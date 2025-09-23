@@ -105,10 +105,15 @@ export const voteForScenario = async (gameId: string, scenarioId: string) => {
  * @param gameId ゲームID
  * @param characterName キャラクター名
  * @param characterDescription キャラクターの説明
+ * @param abilities キャラクターの能力値
  * @returns { characterImageUrl: string }
  */
-export const createCharacter = async (gameId: string, characterName: string, characterDescription: string) => {
-  return callApi(`/games/${gameId}/create-character`, 'POST', { characterName, characterDescription });
+export const createCharacter = async (gameId: string, characterName: string, characterDescription: string, abilities?: any) => {
+  return callApi(`/games/${gameId}/create-character`, 'POST', { 
+    characterName, 
+    characterDescription,
+    abilities 
+  });
 };
 
 /**

@@ -4,11 +4,21 @@ from datetime import datetime
 
 # Firestoreのドキュメントは辞書として扱われるため、Pydanticモデルで構造を定義します。
 
+class CharacterAbilities(BaseModel):
+    """キャラクターの基本能力値（D&D風システム）"""
+    strength: int = 10      # 筋力（物理攻撃、運搬能力）
+    dexterity: int = 10     # 敏捷性（回避、盗賊技能）
+    constitution: int = 10  # 体力（HP、毒耐性）
+    intelligence: int = 10  # 知力（魔法、知識）
+    wisdom: int = 10        # 判断力（感知、意志）
+    charisma: int = 10      # 魅力（交渉、指導力）
+
 class Player(BaseModel):
     name: str  # UIDで代用
     characterName: Optional[str] = None
     characterDescription: Optional[str] = None
     characterImageUrl: Optional[str] = None
+    abilities: Optional[CharacterAbilities] = Field(default_factory=CharacterAbilities)
     isReady: bool = False
     joinedAt: datetime = Field(default_factory=datetime.utcnow)
 

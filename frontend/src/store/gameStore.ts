@@ -9,7 +9,7 @@ interface ScenarioOption {
 
 // オープニング動画の状態
 interface OpeningVideo {
-  status: 'generating' | 'ready' | 'error';
+  status: 'generating' | 'ready' | 'error' | 'disabled';
   url?: string;
   prompt?: string;
 }

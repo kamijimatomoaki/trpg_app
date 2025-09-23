@@ -112,7 +112,17 @@ export const CharacterCreationPage: React.FC = () => {
     setError(null);
     
     try {
-      const result = await createCharacter(storedGameId, characterName, characterDescription);
+      // 能力値データを数値のみの形式に変換
+      const abilitiesData = {
+        strength: scores.strength.value,
+        dexterity: scores.dexterity.value,
+        intelligence: scores.intelligence.value,
+        constitution: scores.constitution.value,
+        wisdom: scores.wisdom.value,
+        charisma: scores.charisma.value
+      };
+      
+      const result = await createCharacter(storedGameId, characterName, characterDescription, abilitiesData);
       setGeneratedImageUrl(result.characterImageUrl);
       setHasSubmitted(true);
     } catch (err: any) {

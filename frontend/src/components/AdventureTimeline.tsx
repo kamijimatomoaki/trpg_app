@@ -24,7 +24,7 @@ import {
 
 interface GameLog {
   turn: number;
-  type: 'gm_narration' | 'player_action' | 'gm_response' | 'dice_roll' | 'image_generation';
+  type: 'gm_narration' | 'initial_narration' | 'player_action' | 'gm_response' | 'dice_roll' | 'image_generation';
   content: string;
   playerId?: string;
   imageUrl?: string;
@@ -45,6 +45,7 @@ const AdventureTimeline: React.FC<AdventureTimelineProps> = ({
   // ログをフィルタリングして重要なイベントのみ表示
   const importantLogs = gameLog.filter(log => 
     log.type === 'gm_narration' || 
+    log.type === 'initial_narration' || 
     log.type === 'player_action' || 
     log.type === 'dice_roll' ||
     (log.type === 'gm_response' && log.content.length > 100) // 重要なGM応答のみ
@@ -53,6 +54,7 @@ const AdventureTimeline: React.FC<AdventureTimelineProps> = ({
   const getLogIcon = (log: GameLog) => {
     switch (log.type) {
       case 'gm_narration':
+      case 'initial_narration':
         return <StartIcon />;
       case 'player_action':
         return <PlayerIcon />;

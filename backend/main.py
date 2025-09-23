@@ -33,19 +33,38 @@ except ImportError:
 
 from models import Game, Player, ScenarioOption, GameLog
 
+# --- 能力値修正計算関数 ---
+def calculate_ability_modifier(ability_score: int) -> int:
+    """D&D5e式の能力値修正を計算"""
+    return (ability_score - 10) // 2
+
+def get_player_ability_modifier(game_data: dict, player_id: str, ability_name: str) -> int:
+    """プレイヤーの指定された能力値の修正値を取得"""
+    try:
+        player = game_data.get('players', {}).get(player_id, {})
+        abilities = player.get('abilities', {})
+        ability_score = abilities.get(ability_name, 10)  # デフォルト値10
+        return calculate_ability_modifier(ability_score)
+    except Exception:
+        return 0  # エラー時は修正値0
+
 # --- ダイスロール関数の定義 ---
-def roll_dice(num_dice: int, num_sides: int) -> dict:
+def roll_dice(num_dice: int, num_sides: int, game_data: dict = None, player_id: str = None, ability_name: str = None) -> dict:
     """
     指定された数のダイスを振り、それぞれの出目を返します。
+    能力値修正も適用可能です。
     例: 2d6 (num_dice=2, num_sides=6)
 
     Args:
         num_dice: 振るダイスの数 (正の整数)。
         num_sides: ダイスの面数 (正の整数)。
+        game_data: ゲームデータ（能力値修正のため）
+        player_id: プレイヤーID（能力値修正のため）
+        ability_name: 能力値名（strength, dexterity等）
 
     Returns:
         各ダイスの出目のリストと合計値を含む辞書。
-        例: {"rolls": [3, 5], "total": 8}
+        例: {"rolls": [3, 5], "total": 8, "modifier": 2, "final_total": 10}
     """
     if not (isinstance(num_dice, int) and num_dice > 0):
         return {"error": "振るダイスの数 (num_dice) は1以上の整数である必要があります。"}
@@ -54,14 +73,29 @@ def roll_dice(num_dice: int, num_sides: int) -> dict:
     
     rolls = [random.randint(1, num_sides) for _ in range(num_dice)]
     total = sum(rolls)
-    print(f"🎲 ダイスロール実行: {num_dice}d{num_sides} -> {rolls} (合計: {total})")
-    return {"rolls": rolls, "total": total}
+    
+    # 能力値修正を計算
+    modifier = 0
+    if game_data and player_id and ability_name:
+        modifier = get_player_ability_modifier(game_data, player_id, ability_name)
+    
+    final_total = total + modifier
+    
+    modifier_text = f" + {modifier}" if modifier > 0 else f" {modifier}" if modifier < 0 else ""
+    print(f"🎲 ダイスロール実行: {num_dice}d{num_sides}{modifier_text} -> {rolls} (ダイス計: {total}, 修正: {modifier}, 最終: {final_total})")
+    
+    result = {"rolls": rolls, "total": total, "final_total": final_total}
+    if modifier != 0:
+        result["modifier"] = modifier
+        result["ability_used"] = ability_name
+    
+    return result
 
 # --- Function Declaration（Geminiにツールとして認識させるため） ---
 # 最新のVertex AI SDK用に修正
 roll_dice_declaration = FunctionDeclaration(
     name="roll_dice",
-    description="指定された数と種類のダイスを振り、出目と合計値を返します。プレイヤーの行動が成功したか失敗したかを判定するために使います。例: 鍵開け判定なら1d20、ダメージなら2d6など。",
+    description="指定された数と種類のダイスを振り、出目と合計値を返します。プレイヤーの行動が成功したか失敗したかを判定するために使います。能力値判定の場合は該当する能力値名を指定すると修正値が自動適用されます。例: 鍵開け判定なら1d20+dexterity、ダメージなら2d6など。",
     parameters={
         "type": "object",
         "properties": {
@@ -72,8 +106,18 @@ roll_dice_declaration = FunctionDeclaration(
             "num_sides": {
                 "type": "integer", 
                 "description": "ダイスの面数 (例: 2d6の'6', D&Dなら通常20面)"
+            },
+            "player_id": {
+                "type": "string",
+                "description": "判定を行うプレイヤーのID（能力値修正を適用する場合）"
+            },
+            "ability_name": {
+                "type": "string",
+                "description": "使用する能力値名（strength, dexterity, constitution, intelligence, wisdom, charisma）",
+                "enum": ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]
             }
-        }
+        },
+        "required": ["num_dice", "num_sides"]
     }
 )
 
@@ -299,7 +343,10 @@ app.add_middleware(
 
 # --- リクエストボディモデル ---
 class VoteRequest(BaseModel): scenarioId: str
-class CreateCharacterRequest(BaseModel): characterName: str; characterDescription: str
+class CreateCharacterRequest(BaseModel): 
+    characterName: str
+    characterDescription: str
+    abilities: Optional[dict] = None
 class ActionRequest(BaseModel): actionText: str
 
 class ManualDiceRequest(BaseModel):
@@ -973,15 +1020,28 @@ def generate_gm_response_task(game_id: str):
                             
                             if function_call.name == "roll_dice":
                                 try:
-                                    # ダイスロール実行
-                                    dice_results = roll_dice(**function_call.args)
-                                    print(f"🎲 ダイスロール実行: {function_call.args['num_dice']}d{function_call.args['num_sides']} -> {dice_results.get('rolls', [])} (合計: {dice_results.get('total', 'エラー')})")
+                                    # ダイスロール実行（ゲームデータを含む）
+                                    args = dict(function_call.args)
+                                    args['game_data'] = game_data  # ゲームデータを追加
+                                    dice_results = roll_dice(**args)
+                                    print(f"🎲 ダイスロール実行: {function_call.args['num_dice']}d{function_call.args['num_sides']} -> {dice_results.get('rolls', [])} (合計: {dice_results.get('total', 'エラー')}, 最終: {dice_results.get('final_total', 'エラー')})")
                                     
                                     # ダイスロール結果をログに記録
                                     if dice_results.get('error'):
                                         log_content = f"ダイスロールエラー: {dice_results.get('error')}"
                                     else:
-                                        log_content = f"ダイスロール ({function_call.args['num_dice']}d{function_call.args['num_sides']}): {dice_results.get('rolls', [])} (合計: {dice_results.get('total', 'エラー')})"
+                                        # 能力値修正が適用されている場合の表示
+                                        dice_total = dice_results.get('total', 0)
+                                        final_total = dice_results.get('final_total', dice_total)
+                                        modifier = dice_results.get('modifier', 0)
+                                        ability_used = dice_results.get('ability_used', '')
+                                        
+                                        if modifier != 0:
+                                            modifier_text = f" + {modifier}" if modifier > 0 else f" {modifier}"
+                                            ability_text = f" ({ability_used})" if ability_used else ""
+                                            log_content = f"ダイスロール ({function_call.args['num_dice']}d{function_call.args['num_sides']}{modifier_text}{ability_text}): {dice_results.get('rolls', [])} (合計: {final_total})"
+                                        else:
+                                            log_content = f"ダイスロール ({function_call.args['num_dice']}d{function_call.args['num_sides']}): {dice_results.get('rolls', [])} (合計: {dice_total})"
 
                                     dice_log_entry = GameLog(
                                         turn=current_turn,
@@ -1112,11 +1172,32 @@ def generate_gm_response_task(game_id: str):
                                             response_text = " ".join(text_parts)
                                             print(f"✅ parts text取得成功: {len(text_parts)}パート, {len(response_text)}文字")
                                 
-                                # どちらの方法でも取得できない場合
+                                # どちらの方法でも取得できない場合 - 追加応答生成を試行
                                 if not response_text:
-                                    print(f"⚠️ テキスト抽出失敗 - 利用可能な属性: {dir(response_with_tool_result)}")
-                                    if hasattr(response_with_tool_result, 'candidates') and response_with_tool_result.candidates:
-                                        print(f"🔍 第1候補の属性: {dir(response_with_tool_result.candidates[0])}")
+                                    print(f"⚠️ テキスト抽出失敗 - Function Call後の追加応答生成を試行")
+                                    try:
+                                        # Function Call完了後、追加でテキスト応答を要求
+                                        follow_up_prompt = "上記のFunction Call結果を踏まえて、ゲームマスターとして次の展開を日本語のナレーションで描写してください。JSON形式は不要で、直接的な物語の描写をお願いします。"
+                                        follow_up_response = chat.send_message(follow_up_prompt)
+                                        
+                                        if hasattr(follow_up_response, 'text') and follow_up_response.text:
+                                            response_text = follow_up_response.text.strip()
+                                            print(f"✅ 追加応答生成成功: {len(response_text)}文字")
+                                        elif (hasattr(follow_up_response, 'candidates') and 
+                                              follow_up_response.candidates and 
+                                              follow_up_response.candidates[0].content.parts):
+                                            text_parts = []
+                                            for part in follow_up_response.candidates[0].content.parts:
+                                                if hasattr(part, 'text') and part.text and part.text.strip():
+                                                    text_parts.append(part.text.strip())
+                                            if text_parts:
+                                                response_text = " ".join(text_parts)
+                                                print(f"✅ 追加応答parts取得成功: {len(response_text)}文字")
+                                    except Exception as follow_up_error:
+                                        print(f"⚠️ 追加応答生成エラー: {follow_up_error}")
+                                    
+                                    if not response_text:
+                                        print(f"⚠️ 全ての応答取得方法が失敗 - フォールバック処理へ")
                                         
                             except Exception as extraction_error:
                                 print(f"⚠️ 応答テキスト抽出エラー: {extraction_error}")
@@ -1538,6 +1619,11 @@ async def create_character(request: Request, game_id: str, req: CreateCharacterR
             f'players.{uid}.characterDescription': req.characterDescription,
             f'players.{uid}.characterImageUrl': image_url,
         }
+        
+        # 能力値が提供されている場合は保存
+        if req.abilities:
+            player_update[f'players.{uid}.abilities'] = req.abilities
+            print(f"🎲 プレイヤー {uid} の能力値を保存: {req.abilities}")
         game_ref.update(player_update)
 
         # キャラクター作成完了後、全員のキャラクター作成が完了したかチェック
