@@ -457,7 +457,7 @@ const EpiloguePage: React.FC = () => {
                 <Alert severity="info" sx={{ mb: 2, maxWidth: 600 }}>
                   <Typography variant="body2">
                     <strong>動画生成について：</strong><br />
-                    • Vertex AI Veo 3を使用してハイライト動画を生成します<br />
+                    • Vertex AI Veo 3を使用して最大8秒のハイライト動画を生成します<br />
                     • 生成には最大10分程度かかる場合があります<br />
                     • APIエラーが発生した場合、代わりにダミー動画が表示されることがあります<br />
                     • 動画生成は1回のみ可能です
