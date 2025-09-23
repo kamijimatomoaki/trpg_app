@@ -286,6 +286,8 @@ origins = [
     "http://localhost:5175",
     "http://localhost:5176",
     "http://localhost:5177",
+    "https://fourth-dynamo-423103-q2.web.app",
+    "https://fourth-dynamo-423103-q2.firebaseapp.com",
 ]
 app.add_middleware(
     CORSMiddleware,
@@ -923,7 +925,7 @@ def generate_gm_response_task(game_id: str):
 
 重要：フィールド名は「narration」と「imagePrompt」を必ず使用してください。「gm_narration」など他の名前は使用しないでください。"""
         
-        narration = "ゲームマスターが次の展開を考えています..."
+        narration = "システムの準備中です。アクションを入力して冒険を開始してください。"
         image_prompt = None
 
         if gemini_model:
@@ -1072,47 +1074,54 @@ def generate_gm_response_task(game_id: str):
                                 )
                             )
                             
-                            # より堅牢な応答テキスト抽出
+                            # より堅牢な応答テキスト抽出（修正版）
                             response_text = ""
                             
-                            # デバッグ: response_with_tool_resultの構造を詳しく調査
-                            print(f"🔍 response_with_tool_result型: {type(response_with_tool_result)}")
-                            print(f"🔍 response_with_tool_result属性: {dir(response_with_tool_result)}")
-                            if hasattr(response_with_tool_result, 'candidates'):
-                                print(f"🔍 candidates数: {len(response_with_tool_result.candidates) if response_with_tool_result.candidates else 0}")
-                                if response_with_tool_result.candidates:
-                                    print(f"🔍 第1候補の型: {type(response_with_tool_result.candidates[0])}")
-                                    if hasattr(response_with_tool_result.candidates[0], 'content'):
-                                        print(f"🔍 content型: {type(response_with_tool_result.candidates[0].content)}")
-                                        if hasattr(response_with_tool_result.candidates[0].content, 'parts'):
-                                            print(f"🔍 parts数: {len(response_with_tool_result.candidates[0].content.parts) if response_with_tool_result.candidates[0].content.parts else 0}")
-                            
-                            # 方法1: 直接textプロパティを試行
                             try:
+                                # 最新のVertex AI SDK応答構造に対応した抽出方法
+                                print(f"🔍 response_with_tool_result型: {type(response_with_tool_result)}")
+                                
+                                # 方法1: 直接textプロパティからの取得
                                 if hasattr(response_with_tool_result, 'text') and response_with_tool_result.text:
                                     response_text = response_with_tool_result.text.strip()
-                                    print(f"🔄 直接text取得成功: {len(response_text)}文字")
-                            except Exception as direct_text_error:
-                                print(f"⚠️ 直接text取得失敗: {direct_text_error}")
-                            
-                            # 方法2: candidatesから手動でtext部分を抽出
-                            if not response_text:
-                                try:
-                                    if (response_with_tool_result.candidates and 
-                                        response_with_tool_result.candidates[0].content.parts):
+                                    print(f"✅ 直接text取得成功: {len(response_text)}文字")
+                                
+                                # 方法2: candidatesからのテキスト抽出（フォールバック）
+                                elif (hasattr(response_with_tool_result, 'candidates') and 
+                                      response_with_tool_result.candidates and 
+                                      len(response_with_tool_result.candidates) > 0):
+                                    
+                                    candidate = response_with_tool_result.candidates[0]
+                                    
+                                    # candidateが直接textを持つ場合
+                                    if hasattr(candidate, 'text') and candidate.text:
+                                        response_text = candidate.text.strip()
+                                        print(f"✅ candidate.text取得成功: {len(response_text)}文字")
+                                    
+                                    # candidate.content.partsから抽出
+                                    elif (hasattr(candidate, 'content') and 
+                                          hasattr(candidate.content, 'parts') and 
+                                          candidate.content.parts):
                                         
                                         text_parts = []
-                                        for part in response_with_tool_result.candidates[0].content.parts:
-                                            if hasattr(part, 'text') and part.text:
-                                                clean_text = part.text.strip()
-                                                if clean_text and clean_text != "":
-                                                    text_parts.append(clean_text)
+                                        for part in candidate.content.parts:
+                                            if hasattr(part, 'text') and part.text and part.text.strip():
+                                                text_parts.append(part.text.strip())
                                         
                                         if text_parts:
                                             response_text = " ".join(text_parts)
-                                            print(f"🔄 candidates text取得成功: {len(text_parts)}パート, {len(response_text)}文字")
-                                except Exception as candidates_error:
-                                    print(f"⚠️ candidates text取得失敗: {candidates_error}")
+                                            print(f"✅ parts text取得成功: {len(text_parts)}パート, {len(response_text)}文字")
+                                
+                                # どちらの方法でも取得できない場合
+                                if not response_text:
+                                    print(f"⚠️ テキスト抽出失敗 - 利用可能な属性: {dir(response_with_tool_result)}")
+                                    if hasattr(response_with_tool_result, 'candidates') and response_with_tool_result.candidates:
+                                        print(f"🔍 第1候補の属性: {dir(response_with_tool_result.candidates[0])}")
+                                        
+                            except Exception as extraction_error:
+                                print(f"⚠️ 応答テキスト抽出エラー: {extraction_error}")
+                                import traceback
+                                print(f"🔍 抽出エラースタックトレース: {traceback.format_exc()}")
                             
                             # JSONパースとフォールバック処理
                             if response_text:
@@ -1180,11 +1189,11 @@ def generate_gm_response_task(game_id: str):
                                             if narration_match:
                                                 narration = narration_match.group(1)
                                             else:
-                                                narration = "ゲームマスターが物語を紡いでいます..."
+                                                narration = "応答の解析に失敗しました。もう一度アクションをお試しください。"
                                             print(f"🔍 画像プロンプト付きJSON検出、ナレーション抽出: {narration[:50]}...")
                                         else:
                                             # 通常のテキスト応答として処理
-                                            narration = response_text if len(response_text) < 1000 else "ゲームマスターが壮大な物語を紡いでいます..."
+                                            narration = response_text if len(response_text) < 1000 else response_text[:1000] + "...(応答が長すぎます。別のアクションをお試しください。)"
                                         
                                         image_prompt = None
                                 else:
@@ -1206,12 +1215,12 @@ def generate_gm_response_task(game_id: str):
                                         if 'is_completed' in func_result and func_result['is_completed']:
                                             narration = f"冒険は完了しました！完了率: {func_result.get('completion_percentage', 0):.1f}%"
                                         else:
-                                            narration = "ゲームマスターが次の展開を考慮中です。しばらくお待ちください..."
+                                            narration = "申し訳ありません。一時的な問題が発生しました。別のアクションで冒険を続けてみてください。"
                                     except Exception as fallback_error:
                                         print(f"⚠️ フォールバック応答生成エラー: {fallback_error}")
-                                        narration = "ゲームマスターが応答を準備しています..."
+                                        narration = "システムの調子が良くないようです。しばらく時間を置いてから、別のアクションをお試しください。"
                                 else:
-                                    narration = "ゲームマスターが応答を準備しています..."
+                                    narration = "処理中に問題が発生しました。別のアクションで物語を進めてみてください。"
                                 image_prompt = None
                             
                             print(f"✅ Function Calling後の応答取得: {len(response_text)}文字")
@@ -1264,11 +1273,11 @@ def generate_gm_response_task(game_id: str):
                         print(f"⚠️ JSON解析失敗: {json_error}")
                         print(f"🔍 応答テキスト内容: {response_text[:200]}...")
                         # JSONでない場合は直接ナレーションとして使用
-                        narration = response_text if len(response_text) < 1000 else "ゲームマスターが壮大な物語を紡いでいます..."
+                        narration = response_text if len(response_text) < 1000 else response_text[:1000] + "...(テキストが長すぎます。別のアクションをお試しください。)"
                         image_prompt = None
                 else:
                     print(f"⚠️ 有効な応答テキストが取得できませんでした")
-                    narration = "ゲームマスターが応答を準備しています..."
+                    narration = "申し訳ありません。応答の生成に失敗しました。もう一度アクションをお試しください。"
                     image_prompt = None
                 
 
@@ -1276,8 +1285,8 @@ def generate_gm_response_task(game_id: str):
                 print(f"🚨 Gemini応答生成エラー: {e}")
                 import traceback
                 print(f"🔍 Gemini応答生成エラースタックトレース: {traceback.format_exc()}")
-                # より親しみやすいエラー応答
-                narration = "申し訳ありません。一時的な問題が発生しました。別の行動を試してみてください。"
+                # より親しみやすいエラー応答（再試行促進型）
+                narration = "申し訳ありません。一時的な問題が発生しました。少し時間を置いてから、別のアクションで冒険を続けてみてください。"
                 image_prompt = None
 
         # 画像生成（プレースホルダー）
