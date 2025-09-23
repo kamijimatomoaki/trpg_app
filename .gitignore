@@ -33,6 +33,12 @@ ENV/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
+
+# Service Account Keys (Security)
+**/firebase-key.json
+**/service-account-key.json
+**/*-key.json
 
 # IDE
 .vscode/

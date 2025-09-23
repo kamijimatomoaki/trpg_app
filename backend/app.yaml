@@ -1,0 +1,50 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: trpg-backend
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/execution-environment: gen2
+spec:
+  template:
+    metadata:
+      annotations:
+        # CPUとメモリの設定
+        run.googleapis.com/cpu: "1"
+        run.googleapis.com/memory: "2Gi"
+        # オートスケーリング設定
+        run.googleapis.com/min-instances: "0"
+        run.googleapis.com/max-instances: "10"
+        # タイムアウト設定（Vertex AI動画生成用に長めに設定）
+        run.googleapis.com/timeout: "3600s"
+    spec:
+      containerConcurrency: 100
+      containers:
+      - image: gcr.io/PROJECT_ID/trpg-backend
+        ports:
+        - name: http1
+          containerPort: 8080
+        env:
+        # 環境変数の設定（Cloud Run Console or gcloudで設定）
+        - name: PROJECT_ID
+          value: "PROJECT_ID_PLACEHOLDER"
+        - name: LOCATION
+          value: "us-central1"
+        - name: FIREBASE_ADMIN_KEY_PATH
+          value: "/secrets/firebase-key.json"
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        # Firebase サービスアカウントキーをマウント
+        volumeMounts:
+        - name: firebase-key
+          mountPath: /secrets
+          readOnly: true
+      volumes:
+      - name: firebase-key
+        secret:
+          secretName: firebase-admin-key
+          items:
+          - key: firebase-key.json
+            path: firebase-key.json

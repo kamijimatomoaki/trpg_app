@@ -1,7 +1,7 @@
 import { useGameStore } from '../store/gameStore';
 
 // バックエンドAPIのベースURL
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 // --- ヘルパー関数: fetch APIでAPIを呼び出す ---
 const callApi = async (endpoint: string, method: string, body?: any) => {
