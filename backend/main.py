@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Depends, status, Header, Body, Backg
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
+from typing import Optional
 import uvicorn
 import firebase_admin
 from firebase_admin import credentials, auth, firestore
@@ -32,6 +33,9 @@ except ImportError:
     print("⚠️ google.generativeai ライブラリが利用できません。pip install google-generativeai を実行してください。")
 
 from models import Game, Player, ScenarioOption, GameLog
+
+# GM応答生成の重複実行防止
+active_gm_tasks = set()
 
 # --- 能力値修正計算関数 ---
 def calculate_ability_modifier(ability_score: int) -> int:
@@ -859,7 +863,15 @@ High quality animation, 4 seconds duration
 #     """重要なターンでのみ動画生成を実行する将来実装用関数"""
 #     pass
 
-def generate_gm_response_task(game_id: str):
+async def generate_gm_response_task(game_id: str):
+    # 重複実行防止チェック
+    if game_id in active_gm_tasks:
+        print(f"⏸️ GM応答生成は既に実行中です: {game_id}")
+        return
+    
+    active_gm_tasks.add(game_id)
+    print(f"🔒 GM応答生成タスクロック取得: {game_id}")
+    
     try:
         # グローバルなアプリインスタンスを取得
         db_client = firestore.client()
@@ -1012,6 +1024,17 @@ def generate_gm_response_task(game_id: str):
                 # Function Callingの処理 - 複数関数呼び出し対応
                 function_responses = []
                 
+                # Gemini応答の詳細デバッグ
+                print(f"🔍 Gemini応答詳細分析開始")
+                print(f"🔍 response型: {type(response)}")
+                print(f"🔍 candidates存在: {hasattr(response, 'candidates') and response.candidates}")
+                if hasattr(response, 'candidates') and response.candidates:
+                    print(f"🔍 candidates数: {len(response.candidates)}")
+                    candidate = response.candidates[0]
+                    print(f"🔍 candidate.function_calls存在: {hasattr(candidate, 'function_calls') and candidate.function_calls}")
+                    if hasattr(candidate, 'function_calls') and candidate.function_calls:
+                        print(f"🔍 function_calls数: {len(candidate.function_calls)}")
+                
                 if response.candidates and response.candidates[0].function_calls:
                     print(f"🛠️ Function Call要求数: {len(response.candidates[0].function_calls)}")
                     
@@ -1140,11 +1163,27 @@ def generate_gm_response_task(game_id: str):
                             try:
                                 # 最新のVertex AI SDK応答構造に対応した抽出方法
                                 print(f"🔍 response_with_tool_result型: {type(response_with_tool_result)}")
+                                print(f"🔍 response_with_tool_result.candidates存在: {hasattr(response_with_tool_result, 'candidates') and response_with_tool_result.candidates}")
+                                
+                                # 応答の詳細構造をデバッグ
+                                if hasattr(response_with_tool_result, 'candidates') and response_with_tool_result.candidates:
+                                    candidate = response_with_tool_result.candidates[0]
+                                    print(f"🔍 candidate.content存在: {hasattr(candidate, 'content')}")
+                                    if hasattr(candidate, 'content'):
+                                        print(f"🔍 candidate.content.parts存在: {hasattr(candidate.content, 'parts') and candidate.content.parts}")
+                                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                                            print(f"🔍 parts数: {len(candidate.content.parts)}")
+                                            for i, part in enumerate(candidate.content.parts):
+                                                print(f"🔍 part[{i}]型: {type(part)}, text存在: {hasattr(part, 'text')}")
+                                                if hasattr(part, 'text'):
+                                                    text_preview = str(part.text)[:50] if part.text else "None"
+                                                    print(f"🔍 part[{i}].text: {text_preview}...")
                                 
                                 # 方法1: 直接textプロパティからの取得
                                 if hasattr(response_with_tool_result, 'text') and response_with_tool_result.text:
                                     response_text = response_with_tool_result.text.strip()
                                     print(f"✅ 直接text取得成功: {len(response_text)}文字")
+                                    print(f"🔍 取得内容プレビュー: {response_text[:100]}...")
                                 
                                 # 方法2: candidatesからのテキスト抽出（フォールバック）
                                 elif (hasattr(response_with_tool_result, 'candidates') and 
@@ -1174,11 +1213,19 @@ def generate_gm_response_task(game_id: str):
                                 
                                 # どちらの方法でも取得できない場合 - 追加応答生成を試行
                                 if not response_text:
-                                    print(f"⚠️ テキスト抽出失敗 - Function Call後の追加応答生成を試行")
+                                    print(f"⚠️ テキスト抽出失敗 - JSON形式での追加応答生成を試行")
                                     try:
-                                        # Function Call完了後、追加でテキスト応答を要求
-                                        follow_up_prompt = "上記のFunction Call結果を踏まえて、ゲームマスターとして次の展開を日本語のナレーションで描写してください。JSON形式は不要で、直接的な物語の描写をお願いします。"
+                                        # Function Call完了後、JSON形式でのナレーション応答を要求
+                                        follow_up_prompt = """上記のFunction Call結果を踏まえて、以下のJSON形式で応答してください：
+{
+  "narration": "ゲームマスターとしての次の展開の詳細な描写（日本語）",
+  "imagePrompt": "シーンの視覚的描写（英語、省略可能）"
+}
+
+重要：必ずこの正確なJSON形式で応答してください。"""
+                                        print(f"🔍 追加プロンプト送信: {len(follow_up_prompt)}文字")
                                         follow_up_response = chat.send_message(follow_up_prompt)
+                                        print(f"🔍 追加応答取得完了: {type(follow_up_response)}")
                                         
                                         if hasattr(follow_up_response, 'text') and follow_up_response.text:
                                             response_text = follow_up_response.text.strip()
@@ -1197,7 +1244,30 @@ def generate_gm_response_task(game_id: str):
                                         print(f"⚠️ 追加応答生成エラー: {follow_up_error}")
                                     
                                     if not response_text:
-                                        print(f"⚠️ 全ての応答取得方法が失敗 - フォールバック処理へ")
+                                        print(f"⚠️ 追加応答生成も失敗 - フォールバック応答を生成")
+                                        # 最終フォールバック: Function Call結果から応答を構築
+                                        if function_responses:
+                                            try:
+                                                func_result = function_responses[0].function_response.response
+                                                if isinstance(func_result, dict):
+                                                    if 'rolls' in func_result:
+                                                        # ダイスロール結果から応答を生成
+                                                        rolls = func_result.get('rolls', [])
+                                                        total = func_result.get('final_total', func_result.get('total', 0))
+                                                        response_text = '{"narration": "ダイスを振りました...結果は' + str(total) + 'です。物語は続きます。", "imagePrompt": null}'
+                                                        print(f"✅ ダイスロール結果からフォールバック応答生成: {total}")
+                                                    else:
+                                                        response_text = '{"narration": "アクションの結果を処理中です。物語は続きます。", "imagePrompt": null}'
+                                                        print(f"✅ 基本フォールバック応答生成")
+                                                else:
+                                                    response_text = '{"narration": "何かが起こりました。冒険を続けましょう。", "imagePrompt": null}'
+                                                    print(f"✅ 汎用フォールバック応答生成")
+                                            except Exception as fallback_error:
+                                                print(f"⚠️ フォールバック応答生成エラー: {fallback_error}")
+                                                response_text = '{"narration": "システムが一時的に不安定です。別のアクションをお試しください。", "imagePrompt": null}'
+                                        else:
+                                            response_text = '{"narration": "処理中に問題が発生しました。別のアクションで物語を進めてみてください。", "imagePrompt": null}'
+                                            print(f"✅ 標準フォールバック応答生成")
                                         
                             except Exception as extraction_error:
                                 print(f"⚠️ 応答テキスト抽出エラー: {extraction_error}")
@@ -1205,6 +1275,9 @@ def generate_gm_response_task(game_id: str):
                                 print(f"🔍 抽出エラースタックトレース: {traceback.format_exc()}")
                             
                             # JSONパースとフォールバック処理
+                            print(f"🔍 最終response_text長: {len(response_text)}文字")
+                            print(f"🔍 response_text内容（最初の200文字）: {response_text[:200]}...")
+                            
                             if response_text:
                                 # まず、テキストがJSONかプレーンテキストかを判定
                                 response_text_cleaned = response_text.strip()
@@ -1366,8 +1439,15 @@ def generate_gm_response_task(game_id: str):
                 print(f"🚨 Gemini応答生成エラー: {e}")
                 import traceback
                 print(f"🔍 Gemini応答生成エラースタックトレース: {traceback.format_exc()}")
-                # より親しみやすいエラー応答（再試行促進型）
-                narration = "申し訳ありません。一時的な問題が発生しました。少し時間を置いてから、別のアクションで冒険を続けてみてください。"
+                
+                # 429エラー（Resource Exhausted）の場合の特別な処理
+                if "429" in str(e) or "Resource exhausted" in str(e) or "ResourceExhausted" in str(e):
+                    print(f"⚠️ Vertex AI APIクォータ上限に達しました。しばらく時間を置いてください。")
+                    narration = "ゲームマスターが少し疲れているようです。数分待ってから、もう一度アクションをお試しください。"
+                else:
+                    # その他のエラーの場合
+                    narration = "申し訳ありません。一時的な問題が発生しました。少し時間を置いてから、別のアクションで冒険を続けてみてください。"
+                
                 image_prompt = None
 
         # 画像生成（プレースホルダー）
@@ -1398,18 +1478,44 @@ def generate_gm_response_task(game_id: str):
             'timestamp': datetime.utcnow().isoformat()
         })
         
-        # ゲーム状態を更新
-        update_data = {
-            "gameLog": firestore.ArrayUnion([log_entry.model_dump()]),
-            "currentTurn": current_turn + 1,
-            "playerActionsThisTurn": {},  # 次のターンのためにリセット
-            "chatHistory": current_chat_history  # チャット履歴を保存
-        }
+        # 安全なFirestore更新（競合状態防止）
+        @firestore.transactional
+        def safe_update_game_state(transaction):
+            # 最新のゲーム状態を再取得
+            latest_snapshot = game_ref.get(transaction=transaction)
+            if not latest_snapshot.exists:
+                raise Exception("Game not found during GM response update")
+            
+            latest_data = latest_snapshot.to_dict()
+            latest_turn = latest_data.get('currentTurn', current_turn)
+            
+            # ターンが既に進行している場合はスキップ
+            if latest_turn > current_turn:
+                print(f"⚠️ ターン既に進行済み: {current_turn} -> {latest_turn}, GM応答をスキップ")
+                return False
+            
+            # 安全にゲーム状態を更新
+            update_data = {
+                "gameLog": firestore.ArrayUnion([log_entry.model_dump()]),
+                "currentTurn": current_turn + 1,
+                "playerActionsThisTurn": {},  # 次のターンのためにリセット
+                "chatHistory": current_chat_history  # チャット履歴を保存
+            }
+            
+            transaction.update(game_ref, update_data)
+            return True
         
-        game_ref.update(update_data)
-        print(f"✅ GM応答生成完了: {game_id}")
-        print(f"📝 応答内容: {narration[:100]}...")
-        print(f"🔄 ターン更新: {current_turn} -> {current_turn + 1}")
+        # トランザクション実行
+        db_client = firestore.client()
+        transaction = db_client.transaction()
+        update_success = safe_update_game_state(transaction)
+        
+        if update_success:
+            print(f"✅ GM応答生成完了: {game_id}")
+            print(f"📝 応答内容: {narration[:100]}...")
+            print(f"🔄 ターン更新: {current_turn} -> {current_turn + 1}")
+        else:
+            print(f"⏭️ GM応答更新スキップ（ターン既に進行済み）: {game_id}")
 
     except Exception as e:
         print(f"GM応答生成に失敗: {e}")
@@ -1433,6 +1539,11 @@ def generate_gm_response_task(game_id: str):
             })
         except Exception as inner_e:
             print(f"エラー処理中にさらにエラー: {inner_e}")
+    
+    finally:
+        # タスク完了後は必ず削除
+        active_gm_tasks.discard(game_id)
+        print(f"🔓 GM応答生成タスクロック解放: {game_id}")
 
 @firestore.transactional
 def update_vote_in_transaction(transaction: Transaction, game_ref, uid: str, scenario_id: str, background_tasks: BackgroundTasks):
@@ -1767,25 +1878,63 @@ async def player_action(request: Request, game_id: str, req: ActionRequest, back
 
         if game_data.get('gameStatus') != 'playing': raise HTTPException(400, "Game not in playing state")
         if uid not in game_data.get('players', {}): raise HTTPException(403, detail="Player not in game")
-        if uid in game_data.get('playerActionsThisTurn', {}): raise HTTPException(400, "You have already acted this turn")
-
-        log_entry = GameLog(turn=game_data['currentTurn'], type='player_action', content=req.actionText, playerId=uid)
+        
+        current_turn = game_data.get('currentTurn', 1)
+        current_actions = game_data.get('playerActionsThisTurn', {})
+        
+        print(f"🔍 トランザクション内: ターン{current_turn}, ユーザー{uid}, 現在アクション数={len(current_actions)}")
+        print(f"🔍 既存アクション: {list(current_actions.keys())}")
+        print(f"🔍 重複チェック: {uid} in {list(current_actions.keys())} = {uid in current_actions}")
+        
+        if uid in current_actions:
+            print(f"🚫 重複アクション検出: ユーザー{uid}は既にターン{current_turn}でアクション済み")
+            raise HTTPException(400, "You have already acted this turn")
+        
+        log_entry = GameLog(turn=current_turn, type='player_action', content=req.actionText, playerId=uid)
         transaction.update(game_ref, {
             f"playerActionsThisTurn.{uid}": req.actionText,
             "gameLog": firestore.ArrayUnion([log_entry.model_dump()])
         })
-        return game_snapshot.to_dict() # Return data for post-transaction check
+        
+        # 更新後の状態を計算して返す（read-after-writeを避ける）
+        updated_actions = current_actions.copy()
+        updated_actions[uid] = req.actionText
+        
+        updated_game_data = game_data.copy()
+        updated_game_data['playerActionsThisTurn'] = updated_actions
+        
+        print(f"🔍 更新後計算: 新しいアクション数={len(updated_actions)}, キー={list(updated_actions.keys())}")
+        return updated_game_data
 
     try:
+        print(f"🔍 player_action処理開始: game_id={game_id}, uid={uid}, action={req.actionText[:50]}...")
         updated_game_data = update_action_in_transaction(db.transaction())
         
         num_players = len(updated_game_data.get('players', {}))
-        num_actions = len(updated_game_data.get('playerActionsThisTurn', {})) + 1 
+        current_actions = updated_game_data.get('playerActionsThisTurn', {})
+        num_actions = len(current_actions)  # 修正: +1を削除（current_actionsは既に更新後）
+        current_turn = updated_game_data.get('currentTurn', 1)
+        
+        print(f"🔍 アクション統計: ターン{current_turn}, プレイヤー数={num_players}, 現在アクション数={num_actions}")
+        print(f"🔍 現在のアクション: {list(current_actions.keys())}")
+        print(f"🔍 GM応答生成条件: {num_actions} >= {num_players} = {num_actions >= num_players}")
 
         if num_actions >= num_players:
+            print(f"✅ GM応答生成タスクを開始: {game_id}")
             background_tasks.add_task(generate_gm_response_task, game_id)
+            gm_response_triggered = True
+        else:
+            print(f"⏸️ GM応答生成を待機: あと{num_players - num_actions}人のアクションが必要")
+            gm_response_triggered = False
 
-        return {"message": "Action recorded."}
+        return {
+            "message": "Action recorded.",
+            "turn": current_turn,
+            "actions_this_turn": num_actions,
+            "total_players": num_players,
+            "gm_response_triggered": gm_response_triggered,
+            "request_id": f"{game_id}-{current_turn}-{uid}"
+        }
     except HTTPException as e:
         raise e
     except Exception as e:
