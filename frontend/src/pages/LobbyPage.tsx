@@ -490,6 +490,11 @@ const LobbyPage: React.FC = () => {
                       : 'オープニング動画を無効にしてコストを節約できます'
                     }
                   </Typography>
+                  {enableOpeningVideo && (
+                    <Typography variant="caption" sx={{ ml: 4.5, mt: 0.5, color: 'warning.main', display: 'block' }}>
+                      ※ Veo 3 APIエラーが発生した場合、ダミー動画が表示される可能性があります
+                    </Typography>
+                  )}
                 </Box>
 
                 {/* エピローグ動画設定 */}
