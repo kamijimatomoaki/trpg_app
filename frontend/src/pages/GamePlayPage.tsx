@@ -30,7 +30,7 @@ import {
 } from '@mui/icons-material';
 import { useGameStore } from '../store/gameStore';
 import { useGameSession } from '../hooks/useGameSession';
-import { submitPlayerAction } from '../services/api';
+import { submitPlayerAction, manualCompleteGame } from '../services/api';
 import { BookStyleContainer } from '../components/BookStyleContainer';
 import DiceRoller from '../components/DiceAnimation/DiceRoller';
 import { CharacterList } from '../components/CharacterList';
@@ -133,6 +133,11 @@ export const GamePlayPage: React.FC = () => {
 
     const renderedItems = gameLog.map((log, index) => {
       try {
+        // 安定したkeyの生成（timestampがない場合はインデックスのみ使用）
+        const stableKey = log.timestamp?.seconds 
+          ? `log-${log.turn || 0}-${log.type}-${log.timestamp.seconds}-${index}`
+          : `log-${log.turn || 0}-${log.type}-${index}`;
+
         // ログアイコンの取得（インライン化）
         let logIcon;
         switch (log.type) {
@@ -176,7 +181,7 @@ export const GamePlayPage: React.FC = () => {
         
         return (
           <ListItem 
-            key={`log-${log.turn || 0}-${log.type}-${index}-${log.timestamp?.seconds || Date.now()}`}
+            key={stableKey}
             sx={{ 
               mb: 2,
               p: 0,
@@ -280,19 +285,28 @@ export const GamePlayPage: React.FC = () => {
         );
       } catch (error) {
         console.error(`Error rendering log ${index}:`, error, log);
-        return null;
+        // nullの代わりにエラー表示のListItemを返却
+        return (
+          <ListItem key={`error-${index}`} sx={{ mb: 2, p: 0, display: 'block' }}>
+            <Paper sx={{ p: 2, bgcolor: '#ffebee', border: '1px solid #f44336' }}>
+              <Typography variant="body2" color="error">
+                ログエントリ #{index + 1} の表示でエラーが発生しました。
+              </Typography>
+            </Paper>
+          </ListItem>
+        );
       }
     });
     
-    console.log('🚨 renderedItems:', renderedItems);
+    // デバッグログを簡略化
     console.log('🚨 renderedItems length:', renderedItems.length);
-    console.log('🚨 renderedItems type:', typeof renderedItems);
-    console.log('🚨 renderedItems[0]:', renderedItems[0]);
-    console.log('🚨 Individual item check:', renderedItems.map((item, idx) => {
-      console.log(`Item ${idx}:`, item);
-      return item?.key || 'no-key';
-    }));
-    return renderedItems;
+    console.log('🚨 renderedItems keys:', renderedItems.map(item => item?.key || 'no-key'));
+    
+    // nullアイテムがないことを確認してフィルタリング
+    const validItems = renderedItems.filter(item => item !== null);
+    console.log('🚨 valid items length:', validItems.length);
+    
+    return validItems;
   }, [gameLog, players]);
 
   // ゲーム終了状態の監視
@@ -342,20 +356,7 @@ export const GamePlayPage: React.FC = () => {
 
     setIsManualCompleting(true);
     try {
-      const { idToken } = useGameStore.getState();
-      const response = await fetch(`http://localhost:8000/games/${gameId}/manual-complete`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`
-        }
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'シナリオの手動完了に失敗しました');
-      }
-
+      await manualCompleteGame(gameId);
       // 成功時は自動的にエピローグページに遷移される（useEffectで監視）
       alert('シナリオを手動で完了しました。エピローグページに移動します。');
     } catch (err: any) {

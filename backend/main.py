@@ -1254,19 +1254,19 @@ async def generate_gm_response_task(game_id: str):
                                                         # ダイスロール結果から応答を生成
                                                         rolls = func_result.get('rolls', [])
                                                         total = func_result.get('final_total', func_result.get('total', 0))
-                                                        response_text = '{"narration": "ダイスを振りました...結果は' + str(total) + 'です。物語は続きます。", "imagePrompt": null}'
+                                                        response_text = "ダイスを振りました...結果は" + str(total) + "です。物語は続きます。"
                                                         print(f"✅ ダイスロール結果からフォールバック応答生成: {total}")
                                                     else:
-                                                        response_text = '{"narration": "アクションの結果を処理中です。物語は続きます。", "imagePrompt": null}'
+                                                        response_text = "アクションの結果を処理中です。物語は続きます。"
                                                         print(f"✅ 基本フォールバック応答生成")
                                                 else:
-                                                    response_text = '{"narration": "何かが起こりました。冒険を続けましょう。", "imagePrompt": null}'
+                                                    response_text = "何かが起こりました。冒険を続けましょう。"
                                                     print(f"✅ 汎用フォールバック応答生成")
                                             except Exception as fallback_error:
                                                 print(f"⚠️ フォールバック応答生成エラー: {fallback_error}")
-                                                response_text = '{"narration": "システムが一時的に不安定です。別のアクションをお試しください。", "imagePrompt": null}'
+                                                response_text = "システムが一時的に不安定です。別のアクションをお試しください。"
                                         else:
-                                            response_text = '{"narration": "処理中に問題が発生しました。別のアクションで物語を進めてみてください。", "imagePrompt": null}'
+                                            response_text = "処理中に問題が発生しました。別のアクションで物語を進めてみてください。"
                                             print(f"✅ 標準フォールバック応答生成")
                                         
                             except Exception as extraction_error:
@@ -1323,7 +1323,7 @@ async def generate_gm_response_task(game_id: str):
                                             narration = (gm_response.get('narration') or 
                                                        gm_response.get('gm_narration') or 
                                                        gm_response.get('text') or 
-                                                       response_text)
+                                                       "応答の処理中に問題が発生しました。"))
                                             image_prompt = (gm_response.get('imagePrompt') or 
                                                           gm_response.get('image_prompt') or 
                                                           gm_response.get('imageUrl'))

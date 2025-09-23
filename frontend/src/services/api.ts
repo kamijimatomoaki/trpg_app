@@ -187,3 +187,12 @@ export const sendGMChat = async (gameId: string, message: string) => {
 export const generateEpilogueVideo = async (gameId: string) => {
   return callApi(`/games/${gameId}/generate-epilogue-video`, 'POST');
 };
+
+/**
+ * シナリオを手動で完了する（ホストのみ）
+ * @param gameId ゲームID
+ * @returns { message: string }
+ */
+export const manualCompleteGame = async (gameId: string) => {
+  return callApi(`/games/${gameId}/manual-complete`, 'POST');
+};
