@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+google-cloud-aiplatform
+firebase-admin
+python-dotenv
+google-cloud-storage
+google-generativeai
