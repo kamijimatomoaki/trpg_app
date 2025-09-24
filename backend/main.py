@@ -2312,25 +2312,45 @@ async def generate_epilogue(request: Request, game_id: str, uid: str = Depends(g
         player_contributions = []
         for player_id, player_data in players.items():
             player_actions = [log for log in game_logs if log.get('playerId') == player_id and log.get('type') == 'player_action']
-            dice_rolls = [log for log in game_logs if log.get('type') == 'dice_roll']
+            # プレイヤー固有のダイスロールを取得（修正：全プレイヤー共通だった問題を解決）
+            player_dice_rolls = [log for log in game_logs if log.get('type') == 'dice_roll' and 
+                               any(action_log.get('playerId') == player_id and action_log.get('turn') == log.get('turn') 
+                                   for action_log in game_logs if action_log.get('type') == 'player_action')]
             
-            # ハイライトモーメントを抽出（最初と最後の行動など）
+            # ハイライトモーメントを抽出（重要な行動を抽出）
             highlight_moments = []
             if player_actions:
                 highlight_moments.append(f"最初の行動: {player_actions[0]['content']}")
-                if len(player_actions) > 1:
-                    highlight_moments.append(f"印象的な行動: {player_actions[-1]['content']}")
+                # より意味のある印象的な行動を選択
+                meaningful_actions = [action for action in player_actions if 
+                                    action['content'] not in ['終わる', '死を受け入れる', 'やめる'] and len(action['content']) > 3]
+                if meaningful_actions and len(meaningful_actions) > 1:
+                    highlight_moments.append(f"印象的な行動: {meaningful_actions[-1]['content']}")
+                elif len(player_actions) > 1:
+                    # 最後の行動が意味のないものの場合は、その前の行動を使用
+                    highlight_moments.append(f"最後の行動: {player_actions[-2]['content'] if len(player_actions) > 1 else player_actions[-1]['content']}")
             
             player_contributions.append({
                 "player_id": player_id,
                 "character_name": player_data.get('characterName', 'Unknown'),
                 "key_actions": [action['content'] for action in player_actions[:3]],  # 最初の3つの行動
-                "dice_rolls": [{"content": roll['content'], "turn": roll['turn']} for roll in dice_rolls[:5]],
+                "dice_rolls": [{"content": roll['content'], "turn": roll['turn']} for roll in player_dice_rolls[:5]],
                 "highlight_moments": highlight_moments
             })
         
         # 冒険サマリーを生成（既存の要約機能を活用して全体の流れを把握）
-        adventure_summary = summarize_game_history(game_logs, max_recent_entries=3, max_tokens=12000)
+        # エピローグ生成用に最後のやり取りを多めに含める
+        adventure_summary = summarize_game_history(game_logs, max_recent_entries=5, max_tokens=12000)
+        
+        # 最後の重要なやり取りも追加で取得
+        recent_important_logs = []
+        final_logs = game_logs[-6:] if len(game_logs) > 6 else game_logs
+        for log in final_logs:
+            if log.get('type') in ['player_action', 'gm_response', 'gm_narration']:
+                recent_important_logs.append(f"ターン{log.get('turn', '?')}: {log.get('type', '')}: {log.get('content', '')[:100]}...")
+        
+        if recent_important_logs:
+            adventure_summary += "\n\n【最終局面の詳細】\n" + "\n".join(recent_important_logs)
         
         # Geminiでエピローグナレーションを生成
         epilogue_prompt = f"""
