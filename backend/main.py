@@ -514,8 +514,8 @@ async def generate_epilogue_video(scenario_title: str, ending_type: str, player_
                 # Veo 3.0を最優先で試行（成功していた方法）
                 try:
                     from vertexai.preview.generative_models import GenerativeModel
-                    veo_client = GenerativeModel("veo-3.0-generate-001")  # モデル名のみ3.0に変更
-                    veo_model_name = "veo-3.0-generate-001"
+                    veo_client = GenerativeModel("veo-2.0-generate-001")  # Veo 2.0に変更
+                    veo_model_name = "veo-2.0-generate-001"
                     veo_model = True
                     print("✅ エピローグ動画用 Vertex AI Veo 3.0初期化成功")
                 except ImportError:
@@ -548,12 +548,16 @@ async def generate_epilogue_video(scenario_title: str, ending_type: str, player_
         
         ending_desc = ending_descriptions.get(ending_type, "epic conclusion")
         
+        # Veo 2英語プロンプト作成（日本語情報を英語的表現に変換）
+        english_completion = "successful" if completion_percentage >= 80 else "challenging" if completion_percentage >= 50 else "difficult"
+        
         prompt = f"""
-Epic fantasy TRPG adventure finale: {scenario_title}
-{ending_desc} ({completion_percentage:.0f}% completion)
-Key heroic moments: {highlights_text}
+Epic fantasy TRPG adventure finale and epilogue scene.
+Adventure outcome: {english_completion} quest conclusion with {completion_percentage:.0f}% objectives completed.
+Final moments: Heroes completing their legendary journey with triumph and resolution.
+Visual style: Cinematic epilogue with dramatic lighting, heroic poses, and mystical atmosphere.
 Cinematic fantasy style, dramatic lighting, medieval fantasy setting
-High quality animation, 4 seconds duration
+High quality animation, 8 seconds duration
 """
         
         print(f"🎬 動画生成開始 - プロンプト: {prompt[:100]}...")
@@ -565,13 +569,15 @@ High quality animation, 4 seconds duration
                 print(f"🎬 Veo動画生成開始...")
                 
                 # 動画生成リクエスト（Veo 3.0 vs Veo 1の分岐）
-                if veo_model_name == "veo-3.0-generate-001":
-                    # Veo 3.0の場合（成功していた2.0と同じ方法）
+                if veo_model_name == "veo-2.0-generate-001":
+                    # Veo 2.0の場合 - パラメータをVeo 2仕様に最適化
                     response = veo_client.generate_content(
                         contents=[prompt],
                         generation_config={
                             "max_output_tokens": 1,
-                            "temperature": 0.7
+                            "temperature": 0.7,
+                            # Veo 2.0のパラメータ
+                            "candidate_count": 1,  # 最大1個の動画を生成
                         }
                     )
                 else:
@@ -820,8 +826,8 @@ async def generate_opening_video_async(game_id: str, scenario_title: str, scenar
                 # 方法1: Vertex AI Veo 2（成功していた実装）
                 try:
                     from vertexai.preview.generative_models import GenerativeModel
-                    veo_client = GenerativeModel("veo-3.0-generate-001")  # モデル名のみ3.0に変更
-                    veo_model_name = "veo-3.0-generate-001"
+                    veo_client = GenerativeModel("veo-2.0-generate-001")  # Veo 2.0に変更
+                    veo_model_name = "veo-2.0-generate-001"
                     veo_model = True
                     print("✅ Vertex AI Veo 3.0初期化成功")
                 except ImportError as veo_import_error:
@@ -858,12 +864,17 @@ async def generate_opening_video_async(game_id: str, scenario_title: str, scenar
             })
             return
             
-        # 実際のVeo動画生成
+        # 実際のVeo動画生成（英語プロンプト作成）
+        # 日本語タイトルを英語的な表現に変換（簡易版）
+        english_title = f"Fantasy Adventure: {scenario_title}" if scenario_title else "Epic Fantasy Adventure"
+        
         prompt = f"""
-Epic fantasy TRPG adventure opening: {scenario_title}
-{scenario_summary}
+Epic fantasy TRPG adventure opening scene.
+Adventure setting: Medieval fantasy world with magic and mystery.
+Atmosphere: Dramatic, cinematic opening sequence with heroic themes.
+Visual style: High fantasy, detailed environments, dynamic camera movement.
 Cinematic fantasy style, dramatic atmosphere, medieval setting
-High quality animation, 4 seconds duration
+High quality animation, 8 seconds duration
 """
         
         print(f"🎬 オープニング動画生成開始: {scenario_title}")
@@ -873,14 +884,16 @@ High quality animation, 4 seconds duration
             try:
                 print(f"🎬 Vertex AI Veo({veo_model_name})でオープニング動画生成")
                 
-                # Veo 3.0とVeo 1で異なる呼び出し方法
-                if veo_model_name == "veo-3.0-generate-001":
-                    # Veo 3.0の場合（成功していた2.0と同じ方法）
+                # Veo 2.0とVeo 1で異なる呼び出し方法
+                if veo_model_name == "veo-2.0-generate-001":
+                    # Veo 2.0の場合 - パラメータをVeo 2仕様に最適化
                     response = veo_client.generate_content(
                         contents=[prompt],
                         generation_config={
                             "max_output_tokens": 1,
-                            "temperature": 0.7
+                            "temperature": 0.7,
+                            # Veo 2.0のパラメータ
+                            "candidate_count": 1,  # 最大1個の動画を生成
                         }
                     )
                 else:
