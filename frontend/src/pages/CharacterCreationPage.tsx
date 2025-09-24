@@ -229,31 +229,42 @@ export const CharacterCreationPage: React.FC = () => {
 
       {/* 進行状況表示 */}
       <Paper sx={{ 
-        p: 2, 
+        p: 3, 
         mb: 4, 
-        backgroundColor: 'background.paper',
-        border: '1px solid',
-        borderColor: 'primary.main',
-        borderRadius: 2
+        backgroundColor: '#F5F1EA',
+        border: '2px solid #8B4513',
+        borderRadius: 3,
+        boxShadow: '0 4px 12px rgba(139, 69, 19, 0.15)'
       }}>
         <Typography variant="subtitle1" gutterBottom sx={{ 
-          color: 'text.primary',
-          fontWeight: 'medium'
+          color: '#2F1B14',
+          fontWeight: 'medium',
+          fontFamily: '"Noto Serif JP", serif'
         }}>
           キャラクター作成進行状況
         </Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
           <Typography variant="body2" sx={{ 
             minWidth: 120,
-            color: 'text.primary',
-            fontWeight: 'medium'
+            color: '#2F1B14',
+            fontWeight: 'medium',
+            fontFamily: '"Noto Serif JP", serif'
           }}>
             {Object.values(players).filter(p => p.characterName).length} / {Object.keys(players).length} 人完了
           </Typography>
           <LinearProgress 
             variant="determinate" 
             value={(Object.values(players).filter(p => p.characterName).length / Object.keys(players).length) * 100}
-            sx={{ flexGrow: 1, ml: 2, height: 8, borderRadius: 4 }}
+            sx={{ 
+              flexGrow: 1, 
+              ml: 2, 
+              height: 8, 
+              borderRadius: 4,
+              backgroundColor: 'rgba(139, 69, 19, 0.2)',
+              '& .MuiLinearProgress-bar': {
+                background: 'linear-gradient(45deg, #8B4513, #D2691E)'
+              }
+            }}
           />
         </Box>
         

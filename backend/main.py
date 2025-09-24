@@ -1478,18 +1478,39 @@ async def generate_gm_response_task(game_id: str):
                                         print(f"🔍 クリーニング前テキスト: {response_text[:100]}...")
                                         print(f"🔍 クリーニング後テキスト: {cleaned_text[:100]}...")
                                         
-                                        # JSON解析失敗時は画像プロンプトと思われる部分を除去してナレーションを抽出
-                                        if '"imagePrompt"' in response_text:
-                                            # imagePromptを含むJSONの可能性があるので、ナレーション部分だけ抽出を試みる
-                                            narration_match = re.search(r'"narration":\s*"([^"]*)"', response_text)
-                                            if narration_match:
-                                                narration = narration_match.group(1)
+                                        # JSON解析失敗時の安全な処理
+                                        if '{' in response_text and '}' in response_text:
+                                            # JSON形式が含まれている可能性が高い場合
+                                            print(f"🔍 JSON形式検出、安全な抽出を実行")
+                                            
+                                            # まず、JSON前のテキスト（ナレーション）を抽出
+                                            json_start = response_text.find('{')
+                                            if json_start > 0:
+                                                pre_json_text = response_text[:json_start].strip()
+                                                if len(pre_json_text) > 10:  # 意味のあるテキストがある場合
+                                                    narration = pre_json_text
+                                                    print(f"✅ JSON前テキスト抽出: {narration[:50]}...")
+                                                else:
+                                                    # JSON内からnarrationフィールドを抽出
+                                                    narration_patterns = [
+                                                        r'"narration":\s*"([^"]+)"',
+                                                        r'"text":\s*"([^"]+)"',
+                                                        r'"content":\s*"([^"]+)"'
+                                                    ]
+                                                    narration = None
+                                                    for pattern in narration_patterns:
+                                                        match = re.search(pattern, response_text)
+                                                        if match:
+                                                            narration = match.group(1)
+                                                            break
+                                                    
+                                                    if not narration:
+                                                        narration = "応答の解析に失敗しました。もう一度アクションをお試しください。"
                                             else:
-                                                narration = "応答の解析に失敗しました。もう一度アクションをお試しください。"
-                                            print(f"🔍 画像プロンプト付きJSON検出、ナレーション抽出: {narration[:50]}...")
+                                                narration = "応答形式に問題があります。もう一度アクションをお試しください。"
                                         else:
-                                            # 通常のテキスト応答として処理
-                                            narration = response_text if len(response_text) < 1000 else response_text[:1000] + "...(応答が長すぎます。別のアクションをお試しください。)"
+                                            # JSON形式ではない通常のテキスト応答
+                                            narration = response_text if len(response_text) < 1000 else response_text[:1000] + "..."
                                         
                                         image_prompt = None
                                 else:
