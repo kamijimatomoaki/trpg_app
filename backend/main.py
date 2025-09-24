@@ -1163,11 +1163,20 @@ async def generate_gm_response_task(game_id: str):
                             
                             if function_call.name == "roll_dice":
                                 try:
-                                    # ダイスロール実行（ゲームデータを含む）
-                                    args = dict(function_call.args)
+                                    # ダイスロール実行（Vertex AIのFunction Call引数を正しく変換）
+                                    args = {}
+                                    for key, value in function_call.args.items():
+                                        if hasattr(value, 'number_value'):
+                                            args[key] = int(value.number_value)
+                                        elif hasattr(value, 'string_value'):
+                                            args[key] = value.string_value
+                                        else:
+                                            args[key] = value
                                     args['game_data'] = game_data  # ゲームデータを追加
+                                    
+                                    print(f"🔍 Function Call引数変換後: {args}")
                                     dice_results = roll_dice(**args)
-                                    print(f"🎲 ダイスロール実行: {function_call.args['num_dice']}d{function_call.args['num_sides']} -> {dice_results.get('rolls', [])} (合計: {dice_results.get('total', 'エラー')}, 最終: {dice_results.get('final_total', 'エラー')})")
+                                    print(f"🎲 ダイスロール実行: {args['num_dice']}d{args['num_sides']} -> {dice_results.get('rolls', [])} (合計: {dice_results.get('total', 'エラー')}, 最終: {dice_results.get('final_total', 'エラー')})")
                                     
                                     # ダイスロール結果をログに記録
                                     if dice_results.get('error'):
@@ -1182,9 +1191,9 @@ async def generate_gm_response_task(game_id: str):
                                         if modifier != 0:
                                             modifier_text = f" + {modifier}" if modifier > 0 else f" {modifier}"
                                             ability_text = f" ({ability_used})" if ability_used else ""
-                                            log_content = f"ダイスロール ({function_call.args['num_dice']}d{function_call.args['num_sides']}{modifier_text}{ability_text}): {dice_results.get('rolls', [])} (合計: {final_total})"
+                                            log_content = f"ダイスロール ({args['num_dice']}d{args['num_sides']}{modifier_text}{ability_text}): {dice_results.get('rolls', [])} (合計: {final_total})"
                                         else:
-                                            log_content = f"ダイスロール ({function_call.args['num_dice']}d{function_call.args['num_sides']}): {dice_results.get('rolls', [])} (合計: {dice_total})"
+                                            log_content = f"ダイスロール ({args['num_dice']}d{args['num_sides']}): {dice_results.get('rolls', [])} (合計: {dice_total})"
 
                                     dice_log_entry = GameLog(
                                         turn=current_turn,
