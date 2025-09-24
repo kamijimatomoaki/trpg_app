@@ -73,12 +73,23 @@ export const VotePage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log(`🗳️ 投票開始: gameId=${storedGameId}, scenarioId=${scenarioId}`);
       await voteForScenario(storedGameId, scenarioId);
+      console.log(`✅ 投票成功: scenarioId=${scenarioId}`);
       setSelectedScenario(scenarioId);
     } catch (err: any) {
-      const message = err.response?.data?.detail || '投票に失敗しました。';
+      // 詳細なエラーログ
+      console.error('❌ 投票エラー詳細:', {
+        status: err.response?.status,
+        statusText: err.response?.statusText,
+        data: err.response?.data,
+        message: err.message,
+        gameId: storedGameId,
+        scenarioId: scenarioId
+      });
+      
+      const message = err.response?.data?.detail || '投票に失敗しました。詳細はコンソールを確認してください。';
       setError(message);
-      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -183,24 +194,61 @@ export const VotePage: React.FC = () => {
                     onMouseEnter={() => setHoveredScenario(scenario.id)}
                     onMouseLeave={() => setHoveredScenario(null)}
                     sx={{
-                      width: 200,
-                      height: 200,
+                      width: 220,
+                      height: 220,
                       borderRadius: '50%',
                       background: isSelected
-                        ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                        : 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                      transform: isHovered || isSelected ? 'scale(1.1)' : 'scale(1)',
-                      transition: 'all 0.3s ease-in-out',
+                        ? `radial-gradient(ellipse at 30% 20%, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0.2) 30%, transparent 70%), 
+                           linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #667eea 100%)`
+                        : `radial-gradient(ellipse at 30% 20%, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0.15) 30%, transparent 70%),
+                           linear-gradient(135deg, #8B4513 0%, #CD853F 30%, #DAA520 70%, #FFD700 100%)`,
+                      transform: isHovered || isSelected ? 'scale(1.08)' : 'scale(1)',
+                      transition: 'all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1)',
                       boxShadow: isSelected 
-                        ? '0 0 30px rgba(102, 126, 234, 0.6)'
+                        ? `inset 0 -8px 16px rgba(0,0,0,0.3),
+                           inset 0 8px 16px rgba(255,255,255,0.2),
+                           0 0 40px rgba(102, 126, 234, 0.8),
+                           0 8px 25px rgba(0,0,0,0.4)`
                         : isHovered 
-                        ? '0 0 20px rgba(240, 147, 251, 0.4)'
-                        : '0 8px 32px rgba(0, 0, 0, 0.12)',
+                        ? `inset 0 -8px 16px rgba(0,0,0,0.3),
+                           inset 0 8px 16px rgba(255,255,255,0.2),
+                           0 0 30px rgba(255, 215, 0, 0.6),
+                           0 8px 25px rgba(0,0,0,0.4)`
+                        : `inset 0 -8px 16px rgba(0,0,0,0.2),
+                           inset 0 8px 16px rgba(255,255,255,0.15),
+                           0 12px 30px rgba(0, 0, 0, 0.3)`,
                       cursor: 'pointer',
                       position: 'relative',
                       overflow: 'visible',
+                      '&:before': {
+                        content: '""',
+                        position: 'absolute',
+                        top: '15%',
+                        left: '20%',
+                        width: '30%',
+                        height: '25%',
+                        borderRadius: '50%',
+                        background: 'radial-gradient(ellipse, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.3) 40%, transparent 70%)',
+                        filter: 'blur(2px)',
+                        zIndex: 1
+                      },
+                      '&:after': {
+                        content: '""',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        borderRadius: '50%',
+                        background: `linear-gradient(135deg, 
+                                      rgba(255,255,255,0.3) 0%, 
+                                      transparent 30%, 
+                                      transparent 70%, 
+                                      rgba(0,0,0,0.2) 100%)`,
+                        pointerEvents: 'none'
+                      },
                       '&:hover': {
-                        transform: 'scale(1.1)',
+                        transform: 'scale(1.08)',
                       },
                       // 浮遊アニメーション
                       animation: `float-${index} 3s ease-in-out infinite`,
@@ -225,12 +273,23 @@ export const VotePage: React.FC = () => {
                       alignItems: 'center',
                       height: '100%',
                       color: 'white',
-                      textAlign: 'center'
+                      textAlign: 'center',
+                      position: 'relative',
+                      zIndex: 2
                     }}>
                       <Typography variant="h6" sx={{ 
                         fontWeight: 'bold',
-                        textShadow: '0 2px 4px rgba(0,0,0,0.3)',
-                        fontSize: '1.1rem'
+                        textShadow: `0 2px 8px rgba(0,0,0,0.6),
+                                     0 0 20px rgba(255,255,255,0.3)`,
+                        fontSize: '1.2rem',
+                        background: isSelected 
+                          ? 'linear-gradient(45deg, #ffffff 30%, #e3f2fd 100%)'
+                          : 'linear-gradient(45deg, #fff5e1 30%, #ffffff 100%)',
+                        backgroundClip: 'text',
+                        WebkitBackgroundClip: 'text',
+                        color: 'transparent',
+                        filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.8))',
+                        fontFamily: 'Georgia, serif'
                       }}>
                         {scenario.title}
                       </Typography>
@@ -238,10 +297,18 @@ export const VotePage: React.FC = () => {
                       {isSelected && (
                         <Typography variant="caption" sx={{ 
                           mt: 1, 
-                          opacity: 0.9,
-                          textShadow: '0 1px 2px rgba(0,0,0,0.3)'
+                          opacity: 0.95,
+                          textShadow: '0 2px 6px rgba(0,0,0,0.8)',
+                          color: '#e3f2fd',
+                          fontWeight: 'bold',
+                          fontSize: '0.9rem',
+                          animation: 'pulse 2s infinite',
+                          '@keyframes pulse': {
+                            '0%, 100%': { opacity: 0.9 },
+                            '50%': { opacity: 1 }
+                          }
                         }}>
-                          選択中
+                          ✨ 選択中 ✨
                         </Typography>
                       )}
                     </CardContent>
