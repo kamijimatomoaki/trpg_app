@@ -37,6 +37,97 @@ from models import Game, Player, ScenarioOption, GameLog
 # GM応答生成の重複実行防止
 active_gm_tasks = set()
 
+# --- ゲーム履歴要約機能 ---
+def summarize_game_history(game_log: list, max_recent_entries: int = 5, max_tokens: int = 8000) -> str:
+    """
+    ゲーム履歴を要約して、トークン数を制限する
+    
+    Args:
+        game_log: ゲームログのリスト
+        max_recent_entries: 詳細保持する最新エントリ数
+        max_tokens: 概算最大トークン数
+    
+    Returns:
+        要約されたゲーム履歴文字列
+    """
+    if not game_log:
+        return "（まだ冒険は始まっていません）"
+    
+    # 重要なイベントのキーワード
+    important_keywords = [
+        '戦闘', '戦い', '攻撃', 'ダメージ', 'HP', '死亡', '発見', '手がかり', 
+        'アイテム', '魔法', '呪文', 'スキル', 'クリティカル', 'ファンブル',
+        '成功', '失敗', 'ボス', '敵', '謎', '解決', '達成', '目標'
+    ]
+    
+    # ログを新しい順に並べる
+    sorted_logs = list(reversed(game_log))
+    
+    # 最新のエントリは詳細保持
+    recent_logs = sorted_logs[:max_recent_entries]
+    older_logs = sorted_logs[max_recent_entries:]
+    
+    # 重要なイベントを古いログから抽出
+    important_events = []
+    for log in older_logs:
+        content = log.get('content', '')
+        if any(keyword in content for keyword in important_keywords):
+            important_events.append(log)
+    
+    # 要約対象の古いログ（重要でないもの）
+    other_logs = [log for log in older_logs if log not in important_events]
+    
+    # 結果文字列を構築
+    result_parts = []
+    
+    # 古い重要でないログの要約
+    if other_logs:
+        # ターン数範囲とログ数を確認
+        turn_numbers = [log.get('turn', 0) for log in other_logs if log.get('turn')]
+        if turn_numbers:
+            min_turn = min(turn_numbers)
+            max_turn = max(turn_numbers)
+            summary = f"【要約】ターン{min_turn}-{max_turn}({len(other_logs)}件): 冒険者たちは探索と対話を続け、情報収集と準備を進めた。"
+        else:
+            summary = f"【要約】序盤({len(other_logs)}件): 冒険者たちは冒険の準備と初期探索を行った。"
+        result_parts.append(summary)
+    
+    # 重要なイベントは詳細保持
+    if important_events:
+        important_events.reverse()  # 時系列順に戻す
+        result_parts.append("\n【重要な出来事】")
+        for event in important_events:
+            log_type = event.get('type', '')
+            player_id = event.get('playerId', 'GM')
+            content = event.get('content', '')
+            # 重要イベントも少し短縮
+            short_content = content[:150] + "..." if len(content) > 150 else content
+            result_parts.append(f"{log_type} ({player_id}): {short_content}")
+    
+    # 最新のログは詳細保持
+    if recent_logs:
+        recent_logs.reverse()  # 時系列順に戻す
+        result_parts.append("\n【最近の展開】")
+        for log in recent_logs:
+            log_type = log.get('type', '')
+            player_id = log.get('playerId', 'GM')
+            content = log.get('content', '')
+            result_parts.append(f"{log_type} ({player_id}): {content}")
+    
+    # 結果を結合
+    result = "\n".join(result_parts)
+    
+    # トークン数チェック（概算: 日本語1文字 ≈ 1.5トークン）
+    estimated_tokens = len(result) * 1.5
+    if estimated_tokens > max_tokens:
+        # さらに短縮が必要な場合
+        truncated_result = result[:int(max_tokens / 1.5)] + "\n...（履歴が長いため一部省略）"
+        print(f"📏 ゲーム履歴トークン数制限適用: {int(estimated_tokens)} → {int(len(truncated_result) * 1.5)} トークン")
+        return truncated_result
+    
+    print(f"📊 ゲーム履歴要約完了: 元{len(game_log)}件 → 推定{int(estimated_tokens)}トークン")
+    return result
+
 # --- 能力値修正計算関数 ---
 def calculate_ability_modifier(ability_score: int) -> int:
     """D&D5e式の能力値修正を計算"""
@@ -892,7 +983,9 @@ async def generate_gm_response_task(game_id: str):
         game_data = game_ref.get().to_dict()
 
         scenario = next((s for s in game_data['scenarioOptions'] if s['id'] == game_data['decidedScenarioId']), None)
-        game_history = "\n".join([f"{log['type']} ({log.get('playerId', 'GM')}): {log['content']}" for log in game_data.get('gameLog', [])])
+        # ゲーム履歴の要約処理を適用
+        game_log = game_data.get('gameLog', [])
+        game_history = summarize_game_history(game_log, max_recent_entries=5, max_tokens=8000)
         
         # プレイヤーアクションの安全な構築
         player_actions_list = []
@@ -1014,12 +1107,26 @@ async def generate_gm_response_task(game_id: str):
                     print(f"🔍 Geminiモデル属性: {dir(gemini_model)}")
                     raise start_chat_error
                 
-                response = chat.send_message(prompt, tools=[scenario_tools], safety_settings={
-                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                })
+                # リクエストサイズを最適化して429エラーを防止
+                generation_config = GenerationConfig(
+                    temperature=0.8,
+                    top_p=0.9,
+                    top_k=40,
+                    max_output_tokens=2048,  # 出力トークン数を制限
+                    candidate_count=1  # 候補数を制限
+                )
+                
+                response = chat.send_message(
+                    prompt, 
+                    tools=[scenario_tools], 
+                    generation_config=generation_config,
+                    safety_settings={
+                        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                    }
+                )
 
                 # Function Callingの処理 - 複数関数呼び出し対応
                 function_responses = []
@@ -1154,6 +1261,11 @@ async def generate_gm_response_task(game_id: str):
                                 Content(
                                     role="user",
                                     parts=function_responses
+                                ),
+                                generation_config=GenerationConfig(
+                                    temperature=0.7,
+                                    max_output_tokens=1024,
+                                    candidate_count=1
                                 )
                             )
                             
@@ -1224,7 +1336,15 @@ async def generate_gm_response_task(game_id: str):
 
 重要：必ずこの正確なJSON形式で応答してください。"""
                                         print(f"🔍 追加プロンプト送信: {len(follow_up_prompt)}文字")
-                                        follow_up_response = chat.send_message(follow_up_prompt)
+                                        # 追加リクエストも最適化
+                                        follow_up_response = chat.send_message(
+                                            follow_up_prompt,
+                                            generation_config=GenerationConfig(
+                                                temperature=0.7,
+                                                max_output_tokens=1024,
+                                                candidate_count=1
+                                            )
+                                        )
                                         print(f"🔍 追加応答取得完了: {type(follow_up_response)}")
                                         
                                         if hasattr(follow_up_response, 'text') and follow_up_response.text:
@@ -1323,7 +1443,7 @@ async def generate_gm_response_task(game_id: str):
                                             narration = (gm_response.get('narration') or 
                                                        gm_response.get('gm_narration') or 
                                                        gm_response.get('text') or 
-                                                       "応答の処理中に問題が発生しました。"))
+                                                       "応答の処理中に問題が発生しました。")
                                             image_prompt = (gm_response.get('imagePrompt') or 
                                                           gm_response.get('image_prompt') or 
                                                           gm_response.get('imageUrl'))
