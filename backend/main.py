@@ -37,6 +37,123 @@ from models import Game, Player, ScenarioOption, GameLog
 # GM応答生成の重複実行防止
 active_gm_tasks = set()
 
+async def translate_and_summarize_for_veo(japanese_content: dict, gemini_model) -> str:
+    """
+    Geminiを使って日本語のゲーム情報を英語の動画プロンプトに翻訳・要約する
+    
+    Args:
+        japanese_content: 日本語のゲーム情報（シナリオ、エピローグなど）
+        gemini_model: Geminiモデルインスタンス
+    
+    Returns:
+        英語の動画プロンプト（最大300文字）
+    """
+    try:
+        # 翻訳・要約プロンプトを構築
+        translation_prompt = f"""以下の日本語のTRPGゲーム情報を、Veo動画生成用の英語プロンプトに変換してください。
+
+シナリオタイトル: {japanese_content.get('scenario_title', '')}
+エピローグ内容: {japanese_content.get('epilogue_narrative', '')}
+結果タイプ: {japanese_content.get('ending_type', '')}
+達成率: {japanese_content.get('completion_percentage', 0)}%
+
+要求：
+- 最大300文字以内の英語プロンプト
+- 映像的な表現に重点を置く
+- ファンタジーTRPGの雰囲気を保持
+- 視覚的要素（場所、人物、動作、雰囲気）を強調
+- "cinematic fantasy style, 8 seconds"を末尾に追加
+
+出力例：
+Epic fantasy adventure conclusion, brave warrior completing heroic quest in ancient castle, dramatic victory scene with magical effects, triumphant finale, cinematic fantasy style, 8 seconds
+
+英語プロンプトのみを出力してください："""
+
+        # Geminiで翻訳・要約
+        translation_response = gemini_model.generate_content(
+            translation_prompt,
+            generation_config=GenerationConfig(
+                temperature=0.4,
+                max_output_tokens=150,
+                candidate_count=1
+            )
+        )
+        
+        if translation_response and translation_response.text:
+            translated = translation_response.text.strip()
+            # 300文字以内に収める
+            if len(translated) > 300:
+                translated = translated[:300].strip()
+            
+            print(f"✅ Gemini翻訳・要約完了: {len(translated)}文字")
+            return translated
+        else:
+            print(f"⚠️ Gemini翻訳・要約失敗、フォールバック")
+            return "Epic fantasy adventure finale, heroes completing legendary quest, dramatic conclusion, cinematic fantasy style, 8 seconds"
+            
+    except Exception as e:
+        print(f"⚠️ Gemini翻訳・要約エラー: {e}")
+        return "Epic fantasy TRPG epilogue scene, heroic conclusion, cinematic fantasy style, 8 seconds"
+
+async def simplify_image_prompt(prompt: str, gemini_model) -> str:
+    """
+    Geminiを使って画像プロンプトを簡潔化して429エラーを防ぐ
+    
+    Args:
+        prompt: 元の画像プロンプト
+        gemini_model: Geminiモデルインスタンス
+    
+    Returns:
+        簡略化された画像プロンプト（最大120文字）
+    """
+    if len(prompt) <= 120:
+        return prompt
+    
+    try:
+        # Geminiに簡略化を依頼
+        simplification_prompt = f"""以下の画像生成プロンプトを120文字以内の簡潔な英語プロンプトに変換してください。
+重要な視覚的要素（場所、人物、動作、雰囲気）のみを保持し、不要な説明は削除してください。
+
+元のプロンプト：
+{prompt}
+
+要求：
+- 120文字以内
+- 英語のみ
+- カンマ区切りのキーワード形式
+- "fantasy style"を末尾に追加
+- 説明文や余計なテキストは一切含めない
+
+出力例：warrior, ancient castle gate, darkness, rusted iron, cold wind, fantasy style"""
+
+        # 軽量なGenerationConfigで簡略化要求
+        simplified_response = gemini_model.generate_content(
+            simplification_prompt,
+            generation_config=GenerationConfig(
+                temperature=0.3,
+                max_output_tokens=100,
+                candidate_count=1
+            )
+        )
+        
+        if simplified_response and simplified_response.text:
+            simplified = simplified_response.text.strip()
+            # 120文字以内に収める
+            if len(simplified) > 120:
+                simplified = simplified[:120].strip()
+            
+            print(f"✅ Gemini画像プロンプト簡略化: {len(prompt)}→{len(simplified)}文字")
+            return simplified
+        else:
+            print(f"⚠️ Gemini簡略化失敗、フォールバック処理")
+            # フォールバック: 最初の120文字を使用
+            return prompt[:120].strip()
+            
+    except Exception as e:
+        print(f"⚠️ Gemini簡略化エラー: {e}")
+        # エラー時フォールバック
+        return prompt[:120].strip()
+
 # --- ゲーム履歴要約機能 ---
 def summarize_game_history(game_log: list, max_recent_entries: int = 5, max_tokens: int = 8000) -> str:
     """
@@ -536,29 +653,33 @@ async def generate_epilogue_video(scenario_title: str, ending_type: str, player_
             print("Veoモデルまたはクライアントが利用できません")
             return None
             
-        # 日本語と英語混合プロンプトでより具体的に
-        highlights_text = ", ".join(player_highlights[:3])  # 最大3つのハイライト
-        
-        ending_descriptions = {
-            "great_success": "triumphant victory with heroes celebrating",
-            "success": "successful completion with heroes proud", 
-            "failure": "bittersweet ending with lessons learned",
-            "disaster": "dramatic failure with heroes reflecting"
-        }
-        
-        ending_desc = ending_descriptions.get(ending_type, "epic conclusion")
-        
-        # Veo 2英語プロンプト作成（日本語情報を英語的表現に変換）
-        english_completion = "successful" if completion_percentage >= 80 else "challenging" if completion_percentage >= 50 else "difficult"
-        
-        prompt = f"""
-Epic fantasy TRPG adventure finale and epilogue scene.
+        # Geminiを使ったプロンプト翻訳・要約（日本語情報を活用）
+        try:
+            from vertexai.generative_models import GenerativeModel
+            gemini_model = GenerativeModel("gemini-2.5-flash")
+            
+            # 日本語のゲーム情報を準備
+            japanese_content = {
+                'scenario_title': scenario_title,
+                'epilogue_narrative': f"プレイヤーハイライト: {', '.join(player_highlights[:3])}",
+                'ending_type': ending_type,
+                'completion_percentage': completion_percentage
+            }
+            
+            # Geminiで翻訳・要約
+            prompt = await translate_and_summarize_for_veo(japanese_content, gemini_model)
+            print(f"✅ Gemini翻訳プロンプト生成完了: {len(prompt)}文字")
+            
+        except Exception as e:
+            print(f"⚠️ Gemini翻訳失敗、フォールバック: {e}")
+            # フォールバック: 元の固定プロンプト
+            highlights_text = ", ".join(player_highlights[:3])
+            english_completion = "successful" if completion_percentage >= 80 else "challenging" if completion_percentage >= 50 else "difficult"
+            
+            prompt = f"""Epic fantasy TRPG adventure finale and epilogue scene.
 Adventure outcome: {english_completion} quest conclusion with {completion_percentage:.0f}% objectives completed.
 Final moments: Heroes completing their legendary journey with triumph and resolution.
-Visual style: Cinematic epilogue with dramatic lighting, heroic poses, and mystical atmosphere.
-Cinematic fantasy style, dramatic lighting, medieval fantasy setting
-High quality animation, 8 seconds duration
-"""
+Cinematic fantasy style, dramatic lighting, medieval fantasy setting, 8 seconds"""
         
         print(f"🎬 動画生成開始 - プロンプト: {prompt[:100]}...")
         
@@ -1078,17 +1199,33 @@ async def generate_gm_response_task(game_id: str):
 # 今回のプレイヤーの行動
 """ + player_actions_str + """
 
-# あなたのタスク
-1. 各プレイヤーの行動を評価し、必要に応じて `roll_dice` を呼び出してください。
-2. ダイスロールの結果を含めて、物語の次の状況を具体的に描写してください。
-3. 重要な目標が達成されたり、大きな進展があった場合は `check_scenario_completion` を呼び出してください。
-4. 応答は必ずこの正確なJSON形式で出力してください（他の形式は使用しないでください）：
-{
-  "narration": "物語の状況描写（日本語で詳細に）",
-  "imagePrompt": "情景画像生成用の英語プロンプト（null可）"
-}
+# 出力形式（絶対に守ってください）
+あなたの応答は以下の厳密なルールに従ってください：
 
-重要：フィールド名は「narration」と「imagePrompt」を必ず使用してください。「gm_narration」など他の名前は使用しないでください。"""
+1. 必要に応じて関数（`roll_dice`、`check_scenario_completion`）を呼び出す
+2. 関数呼び出し後、**必ず以下の正確なJSON形式で**最終応答を行う：
+
+```json
+{
+  "narration": "物語の状況描写（日本語）",
+  "imagePrompt": "情景描写（英語、不要な場合はnull）"
+}
+```
+
+**絶対的な要求事項：**
+- JSON以外のテキスト（説明文、コメント等）は一切出力しない
+- フィールド名は必ず「narration」「imagePrompt」を使用
+- JSONの前後に余計な文字列を追加しない
+- 構文エラーのないValid JSONとして出力
+- imagePromptが不要な場合は "imagePrompt": null
+
+応答例：
+```json
+{
+  "narration": "ガレンは重い石の扉を押し開けた。軋む音と共に冷たい風が頬を撫で、暗闇の向こうに何かが蠢いている気配を感じた。",
+  "imagePrompt": "A warrior pushing open a heavy stone door into darkness"
+}
+```"""
         
         narration = "システムの準備中です。アクションを入力して冒険を開始してください。"
         image_prompt = None
@@ -1421,103 +1558,73 @@ async def generate_gm_response_task(game_id: str):
                             print(f"🔍 response_text内容（最初の200文字）: {response_text[:200]}...")
                             
                             if response_text:
-                                # まず、テキストがJSONかプレーンテキストかを判定
-                                response_text_cleaned = response_text.strip()
+                                # シンプルで確実なJSON解析処理
+                                print(f"🔍 応答テキスト解析開始: {response_text[:100]}...")
+                                narration = None
+                                image_prompt = None
                                 
-                                # JSONの可能性があるかチェック
-                                looks_like_json = (response_text_cleaned.startswith('{') or 
-                                                 response_text_cleaned.startswith('```json') or 
-                                                 '"narration"' in response_text_cleaned or 
-                                                 '"imagePrompt"' in response_text_cleaned)
+                                # Step 1: JSON形式かどうか確認
+                                response_stripped = response_text.strip()
                                 
-                                if looks_like_json:
-                                    try:
-                                        # より厳密なテキストクリーニング
-                                        cleaned_text = response_text.strip()
-                                        
-                                        # BOMと制御文字を除去
-                                        import re
-                                        cleaned_text = re.sub(r'^\ufeff', '', cleaned_text)  # BOM除去
-                                        cleaned_text = re.sub(r'^[\x00-\x1f\x7f-\x9f]+', '', cleaned_text)  # 制御文字除去
-                                        
-                                        # マークダウンJSONブロックを削除
-                                        if cleaned_text.startswith('```json'):
-                                            cleaned_text = cleaned_text[7:]
-                                        if cleaned_text.endswith('```'):
-                                            cleaned_text = cleaned_text[:-3]
-                                        
-                                        # 先頭の余分な文字（クォート、カンマなど）を除去
-                                        cleaned_text = re.sub(r'^[",\s]*', '', cleaned_text)
-                                        
-                                        # JSONの開始を探して修正
-                                        if not cleaned_text.startswith('{'):
-                                            # JSONの開始を探す
-                                            json_start = cleaned_text.find('{')
-                                            if json_start != -1:
-                                                cleaned_text = cleaned_text[json_start:]
-                                        
-                                        cleaned_text = cleaned_text.strip()
-                                        print(f"🔍 クリーニング後のテキスト (最初の100文字): {cleaned_text[:100]}")
-                                        
-                                        gm_response = json.loads(cleaned_text)
-                                        # 複数の可能なフィールド名をチェック（寛容な処理）
-                                        if isinstance(gm_response, dict):
-                                            narration = (gm_response.get('narration') or 
-                                                       gm_response.get('gm_narration') or 
-                                                       gm_response.get('text') or 
-                                                       "応答の処理中に問題が発生しました。")
-                                            image_prompt = (gm_response.get('imagePrompt') or 
-                                                          gm_response.get('image_prompt') or 
-                                                          gm_response.get('imageUrl'))
+                                # Step 2: JSONクリーニング
+                                try:
+                                    # マークダウンJSONブロックを削除
+                                    if '```json' in response_stripped:
+                                        start = response_stripped.find('{')
+                                        end = response_stripped.rfind('}')
+                                        if start != -1 and end != -1 and end > start:
+                                            json_candidate = response_stripped[start:end+1]
                                         else:
-                                            narration = response_text
-                                            image_prompt = None
-                                        print(f"✅ JSON解析成功")
-                                    except json.JSONDecodeError as json_error:
-                                        print(f"⚠️ JSON解析失敗: {json_error}")
-                                        print(f"🔍 クリーニング前テキスト: {response_text[:100]}...")
-                                        print(f"🔍 クリーニング後テキスト: {cleaned_text[:100]}...")
+                                            json_candidate = response_stripped
+                                    else:
+                                        json_candidate = response_stripped
+                                    
+                                    # JSONの開始と終了を確実に見つける
+                                    first_brace = json_candidate.find('{')
+                                    last_brace = json_candidate.rfind('}')
+                                    
+                                    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                                        json_str = json_candidate[first_brace:last_brace+1]
+                                        print(f"🔍 抽出されたJSON: {json_str[:100]}...")
                                         
-                                        # JSON解析失敗時の安全な処理
-                                        if '{' in response_text and '}' in response_text:
-                                            # JSON形式が含まれている可能性が高い場合
-                                            print(f"🔍 JSON形式検出、安全な抽出を実行")
+                                        # JSON解析試行
+                                        parsed_json = json.loads(json_str)
+                                        
+                                        if isinstance(parsed_json, dict):
+                                            narration = parsed_json.get('narration')
+                                            image_prompt = parsed_json.get('imagePrompt')
                                             
-                                            # まず、JSON前のテキスト（ナレーション）を抽出
-                                            json_start = response_text.find('{')
-                                            if json_start > 0:
-                                                pre_json_text = response_text[:json_start].strip()
-                                                if len(pre_json_text) > 10:  # 意味のあるテキストがある場合
-                                                    narration = pre_json_text
-                                                    print(f"✅ JSON前テキスト抽出: {narration[:50]}...")
-                                                else:
-                                                    # JSON内からnarrationフィールドを抽出
-                                                    narration_patterns = [
-                                                        r'"narration":\s*"([^"]+)"',
-                                                        r'"text":\s*"([^"]+)"',
-                                                        r'"content":\s*"([^"]+)"'
-                                                    ]
-                                                    narration = None
-                                                    for pattern in narration_patterns:
-                                                        match = re.search(pattern, response_text)
-                                                        if match:
-                                                            narration = match.group(1)
-                                                            break
-                                                    
-                                                    if not narration:
-                                                        narration = "応答の解析に失敗しました。もう一度アクションをお試しください。"
+                                            if narration:
+                                                print(f"✅ JSON解析成功: narration={len(narration)}文字, imagePrompt={bool(image_prompt)}")
                                             else:
-                                                narration = "応答形式に問題があります。もう一度アクションをお試しください。"
+                                                print(f"⚠️ narrationフィールドが空またはnull")
+                                                narration = "応答の処理に問題が発生しました。再度アクションを送信してください。"
                                         else:
-                                            # JSON形式ではない通常のテキスト応答
-                                            narration = response_text if len(response_text) < 1000 else response_text[:1000] + "..."
-                                        
-                                        image_prompt = None
-                                else:
-                                    # プレーンテキストのナレーション（JSONではない）
-                                    print(f"✅ プレーンテキストナレーション検出: {len(response_text)}文字")
-                                    narration = response_text if len(response_text) < 2000 else response_text[:2000] + "..."
+                                            print(f"⚠️ 解析結果が辞書型でない: {type(parsed_json)}")
+                                            narration = "応答形式に問題があります。再度アクションを送信してください。"
+                                    else:
+                                        print(f"⚠️ JSON構造が検出されない")
+                                        narration = "ゲームマスターの応答を解析中にエラーが発生しました。再度アクションを送信してください。"
+                                except json.JSONDecodeError as json_error:
+                                    print(f"⚠️ JSON解析失敗: {json_error}")
+                                    print(f"🔍 解析対象テキスト: {response_stripped[:200]}...")
+                                    narration = "ゲームマスターの応答形式にエラーが発生しました。再度アクションを送信してください。"
                                     image_prompt = None
+                                except Exception as parse_error:
+                                    print(f"⚠️ 予期しない解析エラー: {parse_error}")
+                                    narration = "システムエラーが発生しました。再度アクションを送信してください。"
+                                    image_prompt = None
+                                
+                                # フォールバック: narrationが取得できなかった場合
+                                if not narration:
+                                    print(f"🔍 フォールバック処理: response_textを直接使用")
+                                    if response_text and len(response_text) > 0:
+                                        # プレーンテキストとして扱う
+                                        narration = response_text[:1000] if len(response_text) > 1000 else response_text
+                                        image_prompt = None
+                                    else:
+                                        narration = "ゲームマスターから有効な応答を受信できませんでした。再度アクションを送信してください。"
+                                        image_prompt = None
                             else:
                                 print(f"⚠️ 有効な応答テキストが取得できませんでした")
                                 print(f"🔍 Function Call結果をデバッグ表示:")
@@ -1613,10 +1720,18 @@ async def generate_gm_response_task(game_id: str):
                 
                 image_prompt = None
 
-        # 画像生成処理
+        # 画像生成処理（プロンプト簡略化を含む）
         image_url = None
         if image_prompt and imagen_model:
             try:
+                # imagePromptの長さ制限とGemini簡略化
+                if len(image_prompt) > 120:
+                    print(f"⚠️ imagePrompt長すぎ ({len(image_prompt)}文字), Gemini簡略化中...")
+                    # Geminiを使って簡潔化
+                    simplified_prompt = await simplify_image_prompt(image_prompt, gemini_model)
+                    print(f"✅ imagePrompt簡略化: {len(simplified_prompt)}文字")
+                    image_prompt = simplified_prompt
+                
                 print(f"🎨 GM応答用画像生成開始: {image_prompt}")
                 
                 # Imagen APIで画像生成
@@ -1745,7 +1860,7 @@ async def generate_gm_response_task(game_id: str):
             error_log_entry = GameLog(
                 turn=current_turn,
                 type='gm_response',
-                content="申し訳ありません。ゲームマスターが一時的に考え込んでいます。少しお待ちください..."
+                content="システムエラーが発生しました。再度アクションを送信してゲームを続行してください。"
             )
             
             game_ref.update({
