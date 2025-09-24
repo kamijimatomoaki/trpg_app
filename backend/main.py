@@ -1592,11 +1592,53 @@ async def generate_gm_response_task(game_id: str):
                 
                 image_prompt = None
 
-        # 画像生成（プレースホルダー）
+        # 画像生成処理
         image_url = None
-        if image_prompt:
-            # 実際にはImagen APIで画像を生成
-            image_url = "https://picsum.photos/600/400?random=scene"
+        if image_prompt and imagen_model:
+            try:
+                print(f"🎨 GM応答用画像生成開始: {image_prompt}")
+                
+                # Imagen APIで画像生成
+                response = imagen_model.generate_images(
+                    prompt=image_prompt,
+                    number_of_images=1,
+                    language="en"  # 画像プロンプトは通常英語
+                )
+                
+                if response and hasattr(response, 'images') and len(response.images) > 0:
+                    generated_image = response.images[0]
+                    print(f"✅ GM応答用Imagen画像生成成功")
+                    
+                    # 画像データを取得
+                    image_data = None
+                    if hasattr(generated_image, '_image_bytes'):
+                        image_data = generated_image._image_bytes
+                    elif hasattr(generated_image, 'data'):
+                        image_data = generated_image.data
+                    elif hasattr(generated_image, 'content'):
+                        image_data = generated_image.content
+                        
+                    if image_data and app.state.storage_bucket:
+                        # Cloud Storageにアップロード
+                        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                        filename = f"scenes/{game_id}/scene_{current_turn}_{timestamp}.png"
+                        
+                        image_url = upload_image_to_storage(image_data, app.state.storage_bucket, filename)
+                        print(f"🔗 GM応答用画像Cloud Storage URL: {image_url}")
+                    else:
+                        print(f"⚠️ 画像データ取得失敗、プレースホルダーを使用")
+                        image_url = f"https://picsum.photos/600/400?random={hash(image_prompt) % 1000}"
+                else:
+                    print(f"❌ GM応答用Imagen画像生成に失敗")
+                    image_url = f"https://picsum.photos/600/400?random={hash(image_prompt) % 1000}"
+                    
+            except Exception as img_error:
+                print(f"🚨 GM応答用画像生成エラー: {img_error}")
+                image_url = f"https://picsum.photos/600/400?random={hash(image_prompt) % 1000}"
+        elif image_prompt:
+            # Imagenモデルが利用できない場合のプレースホルダー
+            print(f"⚠️ Imagenモデル利用不可、プレースホルダー使用")
+            image_url = f"https://picsum.photos/600/400?random={hash(image_prompt) % 1000}"
 
         # ゲームログに追加
         current_turn = game_data.get('currentTurn', 1)
@@ -1606,6 +1648,17 @@ async def generate_gm_response_task(game_id: str):
             content=narration,
             imageUrl=image_url
         )
+        
+        # 画像生成状況をログに追加で記録
+        if image_prompt:
+            if image_url:
+                print(f"✅ 画像生成完了 - ターン{current_turn}: {image_url}")
+            else:
+                print(f"❌ 画像生成失敗 - ターン{current_turn}: プロンプト='{image_prompt}'")
+        else:
+            print(f"ℹ️ 画像プロンプトなし - ターン{current_turn}")
+            
+        print(f"📝 ゲームログエントリ作成: type={log_entry.type}, imageUrl={bool(log_entry.imageUrl)}")
 
         # チャット履歴を更新（ユーザーメッセージと応答を保存）
         current_chat_history = game_data.get('chatHistory', [])
@@ -2276,9 +2329,8 @@ async def generate_epilogue(request: Request, game_id: str, uid: str = Depends(g
                 "highlight_moments": highlight_moments
             })
         
-        # 冒険サマリーを生成
-        adventure_summary_logs = [f"ターン{log['turn']}: {log['content'][:100]}..." for log in game_logs if log.get('type') in ['gm_narration', 'gm_response']][:5]
-        adventure_summary = "\n".join(adventure_summary_logs)
+        # 冒険サマリーを生成（既存の要約機能を活用して全体の流れを把握）
+        adventure_summary = summarize_game_history(game_logs, max_recent_entries=3, max_tokens=12000)
         
         # Geminiでエピローグナレーションを生成
         epilogue_prompt = f"""
