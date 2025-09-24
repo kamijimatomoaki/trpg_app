@@ -277,6 +277,28 @@ export const GamePlayPage: React.FC = () => {
                     }}>
                       {log.content || log.text || 'コンテンツが見つかりません'}
                     </Typography>
+                    
+                    {/* 画像がある場合は表示 */}
+                    {log.imageUrl && (
+                      <Box sx={{ mt: 2 }}>
+                        <img
+                          src={log.imageUrl}
+                          alt="シーンの画像"
+                          style={{
+                            maxWidth: '100%',
+                            height: 'auto',
+                            borderRadius: '8px',
+                            boxShadow: '0 4px 12px rgba(139, 69, 19, 0.2)',
+                            border: '2px solid rgba(139, 69, 19, 0.3)'
+                          }}
+                          onError={(e) => {
+                            // 画像読み込みエラー時はプレースホルダーを表示
+                            e.currentTarget.style.display = 'none';
+                            console.warn(`画像の読み込みに失敗しました: ${log.imageUrl}`);
+                          }}
+                        />
+                      </Box>
+                    )}
                   </Box>
                 </Box>
               </Box>
