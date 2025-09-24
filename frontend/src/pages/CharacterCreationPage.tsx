@@ -228,12 +228,26 @@ export const CharacterCreationPage: React.FC = () => {
         <Container maxWidth="lg" sx={{ mt: 0, mb: 0 }}>
 
       {/* 進行状況表示 */}
-      <Paper sx={{ p: 2, mb: 4, backgroundColor: 'rgba(255, 107, 107, 0.05)' }}>
-        <Typography variant="subtitle1" gutterBottom>
+      <Paper sx={{ 
+        p: 2, 
+        mb: 4, 
+        backgroundColor: 'background.paper',
+        border: '1px solid',
+        borderColor: 'primary.main',
+        borderRadius: 2
+      }}>
+        <Typography variant="subtitle1" gutterBottom sx={{ 
+          color: 'text.primary',
+          fontWeight: 'medium'
+        }}>
           キャラクター作成進行状況
         </Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-          <Typography variant="body2" sx={{ minWidth: 120 }}>
+          <Typography variant="body2" sx={{ 
+            minWidth: 120,
+            color: 'text.primary',
+            fontWeight: 'medium'
+          }}>
             {Object.values(players).filter(p => p.characterName).length} / {Object.keys(players).length} 人完了
           </Typography>
           <LinearProgress 
